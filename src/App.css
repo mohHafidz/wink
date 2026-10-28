@@ -1,0 +1,92 @@
+@import "tailwindcss";
+
+:root {
+  --font-system: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --ease-apple: cubic-bezier(0.16, 1, 0.28, 1);
+  --anim-duration: 580ms;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background: transparent !important;
+  font-family: var(--font-system);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+  user-select: none;
+}
+
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+.ease-apple {
+  transition-timing-function: var(--ease-apple);
+  transition-duration: var(--anim-duration);
+}
+
+/* HIG Glass Materials */
+.hig-glass-dark {
+  background: rgba(20, 21, 25, 0.86);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 20px 48px -12px rgba(0, 0, 0, 0.7), 0 1px 0 rgba(255, 255, 255, 0.08) inset;
+}
+
+.hig-glass-light {
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  box-shadow: 0 18px 40px -12px rgba(15, 23, 42, 0.24), 0 2px 6px rgba(15, 23, 42, 0.06), 0 1px 0 rgba(255, 255, 255, 1) inset;
+}
+
+/* Scoped Light Mode Text & Contrast */
+.hig-glass-light .text-white\/70 {
+  color: rgba(28, 31, 38, 0.75);
+}
+
+.hig-glass-light .text-white\/40 {
+  color: rgba(28, 31, 38, 0.58);
+}
+
+.hig-glass-light .hover\:text-white:hover {
+  color: #1c1f26;
+}
+
+.hig-glass-light .bg-white\/\[0\.04\],
+.hig-glass-light .bg-white\/\[0\.05\],
+.hig-glass-light .bg-white\/\[0\.06\] {
+  background-color: rgba(15, 23, 42, 0.05);
+}
+
+.hig-glass-light .bg-white\/10 {
+  background-color: rgba(15, 23, 42, 0.08);
+}
+
+.hig-glass-light .bg-white\/15 {
+  background-color: rgba(15, 23, 42, 0.12);
+}
+
+.hig-glass-light .border-white\/10,
+.hig-glass-light .border-white\/\[0\.06\],
+.hig-glass-light .border-white\/\[0\.08\] {
+  border-color: rgba(15, 23, 42, 0.12);
+}
+
+.hig-glass-light .play-btn {
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.15), 0 2px 6px rgba(15, 23, 42, 0.15);
+}
+
+/* Custom minimal scrollbar */
+.hig-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.hig-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(140, 140, 150, 0.3);
+  border-radius: 9999px;
+}
