@@ -20,6 +20,7 @@ website/
 .env
 .env*.local
 *.pem
+*.key
 
 # Logs
 logs/

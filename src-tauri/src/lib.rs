@@ -135,6 +135,7 @@ fn move_to_monitor(window: tauri::WebviewWindow, index: usize) -> Result<(), Str
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             media::init_media_worker();
             clipboard::init_clipboard_listener();

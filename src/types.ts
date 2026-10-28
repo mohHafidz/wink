@@ -6,7 +6,17 @@ export type LifecycleState =
   | 'pinned-shelf'
   | 'pinned-clip'
   | 'stealth-micro'
-  | 'volume-hud';
+  | 'volume-hud'
+  | 'update-alert'
+  | 'update-downloading'
+  | 'update-ready';
+
+export interface UpdateInfo {
+  version: string;
+  currentVersion: string;
+  body?: string;
+  date?: string;
+}
 
 export interface MediaTrackInfo {
   title: string;

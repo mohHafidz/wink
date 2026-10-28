@@ -8,8 +8,12 @@ import {
   Power,
   Check,
   X,
+  RotateCw,
+  Sparkles,
 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { emit } from '@tauri-apps/api/event';
+import { check } from '@tauri-apps/plugin-updater';
 import { AppSettings, DEFAULT_SETTINGS } from '../types';
 import { getStoredSettings, fetchStoredSettings, saveStoredSettings } from '../settingsStore';
 
@@ -18,9 +22,39 @@ interface SettingsProps {
 }
 
 export const SettingsWindow: React.FC<SettingsProps> = ({ onClose }) => {
-  const [activeTab, setActiveTab] = useState<'tampilan' | 'perilaku' | 'audio' | 'monitor' | 'sistem'>('tampilan');
+  const [activeTab, setActiveTab] = useState<'tampilan' | 'perilaku' | 'audio' | 'monitor' | 'sistem' | 'pembaruan'>('tampilan');
   const [settings, setSettings] = useState<AppSettings>(() => getStoredSettings());
   const [isSavedNotice, setIsSavedNotice] = useState<boolean>(false);
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState<boolean>(false);
+  const [updateStatus, setUpdateStatus] = useState<string | null>(null);
+
+  const handleCheckUpdate = async () => {
+    setIsCheckingUpdate(true);
+    setUpdateStatus('Memeriksa server GitHub...');
+    try {
+      const update = await check();
+      if (update) {
+        setUpdateStatus(`Versi ${update.version} tersedia untuk dipasang!`);
+        emit('wink-trigger-update-alert', {
+          version: update.version,
+          body: update.body || 'Pembaruan resmi Wink',
+        });
+      } else {
+        setUpdateStatus('Aplikasi Anda sudah menggunakan versi terbaru (v1.2.0).');
+      }
+    } catch {
+      setUpdateStatus('Tidak dapat terhubung ke server update saat ini.');
+    } finally {
+      setIsCheckingUpdate(false);
+    }
+  };
+
+  const handleSimulateNotchAlert = async () => {
+    emit('wink-trigger-update-alert', {
+      version: 'v1.2.1',
+      body: 'Sinkronisasi GSMTC & Fluid Spring Physics',
+    });
+  };
 
   useEffect(() => {
     // Muat konfigurasi terbaru langsung dari disk & registry Windows saat jendela pengaturan dibuka
@@ -149,10 +183,20 @@ export const SettingsWindow: React.FC<SettingsProps> = ({ onClose }) => {
               <Power className="w-4 h-4" />
               <span>Sistem & Startup</span>
             </button>
+
+            <button
+              onClick={() => setActiveTab('pembaruan')}
+              className={`w-full text-left px-2.5 py-2 rounded-lg text-xs font-medium flex items-center gap-2.5 transition ${
+                activeTab === 'pembaruan' ? 'bg-white/10 text-teal-300' : 'text-white/60 hover:text-white hover:bg-white/[0.04]'
+              }`}
+            >
+              <RotateCw className="w-4 h-4" />
+              <span>Pembaruan</span>
+            </button>
           </div>
 
           <div className="px-2 pt-2 border-t border-white/[0.06] text-[10px] text-white/40 flex items-center justify-between">
-            <span>v0.1.0</span>
+            <span>v1.2.0</span>
             <span className="text-teal-400">Tauri v2</span>
           </div>
         </aside>
@@ -445,6 +489,67 @@ export const SettingsWindow: React.FC<SettingsProps> = ({ onClose }) => {
                 >
                   Reset Default
                 </button>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 6: PEMBARUAN */}
+          {activeTab === 'pembaruan' && (
+            <div className="space-y-4">
+              <div>
+                <h2 className="text-sm font-semibold text-white/95">Pembaruan Aplikasi</h2>
+                <p className="text-xs text-white/50">Kelola versi Wink dan sinkronisasi rilis otomatis via GitHub.</p>
+              </div>
+
+              {/* Status Card */}
+              <div className="bg-white/[0.04] border border-white/[0.06] rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-[11px] font-mono text-white/50">Versi Terpasang</div>
+                    <div className="text-sm font-bold text-white font-mono flex items-center gap-2 mt-0.5">
+                      <span>v1.2.0-stable</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                        Aktif
+                      </span>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={handleCheckUpdate}
+                    disabled={isCheckingUpdate}
+                    className="px-3.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 border border-white/15 text-white font-medium text-xs transition flex items-center gap-1.5 active:scale-95 disabled:opacity-50"
+                  >
+                    <RotateCw className={`w-3.5 h-3.5 ${isCheckingUpdate ? 'animate-spin' : ''}`} />
+                    <span>{isCheckingUpdate ? 'Memeriksa...' : 'Periksa Sekarang'}</span>
+                  </button>
+                </div>
+
+                {updateStatus && (
+                  <div className="text-xs font-mono text-teal-300 bg-teal-500/10 border border-teal-500/20 p-2.5 rounded-lg">
+                    {updateStatus}
+                  </div>
+                )}
+              </div>
+
+              {/* Simulation Testing Tool */}
+              <div className="bg-white/[0.04] border border-white/[0.06] rounded-xl p-4 space-y-2">
+                <div className="text-xs font-semibold text-white/90">Uji Coba Respon Notch</div>
+                <p className="text-[11px] text-white/50 leading-relaxed">
+                  Tekan tombol di bawah untuk menyimulasikan bagaimana Notch Wink di atas monitor mengembang dan menampilkan notifikasi pembaruan secara langsung.
+                </p>
+                <div className="pt-2">
+                  <button
+                    onClick={handleSimulateNotchAlert}
+                    className="px-3.5 py-2 rounded-lg bg-teal-500/20 hover:bg-teal-500/30 border border-teal-500/40 text-teal-300 font-medium text-xs transition active:scale-95 flex items-center gap-1.5 shadow-sm"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Trigger Alert di Notch Sekarang</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="text-[11px] text-white/40 font-mono pt-2">
+                Pembaruan biner diverifikasi otomatis menggunakan tanda tangan kriptografi Minisign SHA-256.
               </div>
             </div>
           )}

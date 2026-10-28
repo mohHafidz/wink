@@ -14,7 +14,10 @@ import {
   Settings,
   Volume2,
   VolumeX,
+  Download,
+  RotateCw,
 } from 'lucide-react';
+import { check, Update } from '@tauri-apps/plugin-updater';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
@@ -97,6 +100,17 @@ export const DynamicIsland: React.FC = () => {
   const isSkipActionRef = useRef<boolean>(false);
   const stoppedSinceRef = useRef<number>(Date.now()); // Waktu sejak media berhenti (idle/paused)
 
+  // Auto-Updater State
+  const [updateObj, setUpdateObj] = useState<Update | null>(null);
+  const [updateMeta, setUpdateMeta] = useState<{ version: string; body?: string } | null>(null);
+  const [hasPendingUpdate, setHasPendingUpdate] = useState<boolean>(false);
+  const [downloadProgress, setDownloadProgress] = useState<{ percent: number; currentMb: number; totalMb: number }>({
+    percent: 0,
+    currentMb: 0,
+    totalMb: 0,
+  });
+  const updateToastTimerRef = useRef<number | null>(null);
+
   // Listen for realtime cross-window Settings updates from SettingsWindow
   useEffect(() => {
     let unlistenFn: (() => void) | null = null;
@@ -131,6 +145,124 @@ export const DynamicIsland: React.FC = () => {
     };
   }, []);
 
+  // Listen for manual trigger from Settings window & Check updates on startup
+  useEffect(() => {
+    let unlistenSim: (() => void) | null = null;
+    listen<{ version?: string; body?: string }>('wink-trigger-update-alert', (event) => {
+      setUpdateMeta({
+        version: event.payload?.version || 'v1.2.1',
+        body: event.payload?.body || 'Sinkronisasi GSMTC & Fluid Spring Physics',
+      });
+      setState('update-alert');
+      if (updateToastTimerRef.current) clearTimeout(updateToastTimerRef.current);
+      updateToastTimerRef.current = window.setTimeout(() => {
+        setHasPendingUpdate(true);
+        setState((prev) => (prev === 'update-alert' ? (isPlaying ? 'ambient-active' : 'pure-idle') : prev));
+      }, 6000);
+    }).then((un) => {
+      unlistenSim = un;
+    }).catch(() => {});
+
+    // Check GitHub Releases after 5 seconds of startup
+    const startupTimer = setTimeout(async () => {
+      try {
+        const update = await check();
+        if (update) {
+          setUpdateObj(update);
+          setUpdateMeta({
+            version: update.version,
+            body: update.body || 'Pembaruan versi terbaru Wink',
+          });
+          setState('update-alert');
+          if (updateToastTimerRef.current) clearTimeout(updateToastTimerRef.current);
+          updateToastTimerRef.current = window.setTimeout(() => {
+            setHasPendingUpdate(true);
+            setState((prev) => (prev === 'update-alert' ? (isPlaying ? 'ambient-active' : 'pure-idle') : prev));
+          }, 6000);
+        }
+      } catch (err) {
+        // Silent in local/offline environment
+      }
+    }, 5000);
+
+    return () => {
+      clearTimeout(startupTimer);
+      if (updateToastTimerRef.current) clearTimeout(updateToastTimerRef.current);
+      if (unlistenSim) unlistenSim();
+    };
+  }, [isPlaying]);
+
+  const startDownload = async () => {
+    if (updateToastTimerRef.current) clearTimeout(updateToastTimerRef.current);
+    setState('update-downloading');
+
+    if (!updateObj) {
+      // In dev or simulated test: animate download
+      let p = 15;
+      const interval = setInterval(() => {
+        p += 12;
+        if (p >= 100) {
+          p = 100;
+          clearInterval(interval);
+          setDownloadProgress({ percent: 100, currentMb: 24.8, totalMb: 24.8 });
+          setTimeout(() => setState('update-ready'), 350);
+        } else {
+          setDownloadProgress({
+            percent: p,
+            currentMb: parseFloat(((p / 100) * 24.8).toFixed(1)),
+            totalMb: 24.8,
+          });
+        }
+      }, 160);
+      return;
+    }
+
+    try {
+      let downloaded = 0;
+      let total = 0;
+      await updateObj.download((event) => {
+        if (event.event === 'Started') {
+          total = event.data.contentLength || 0;
+        } else if (event.event === 'Progress') {
+          downloaded += event.data.chunkLength;
+          const pct = total > 0 ? Math.round((downloaded / total) * 100) : 50;
+          setDownloadProgress({
+            percent: pct,
+            currentMb: parseFloat((downloaded / (1024 * 1024)).toFixed(1)),
+            totalMb: parseFloat((total / (1024 * 1024)).toFixed(1)),
+          });
+        } else if (event.event === 'Finished') {
+          setState('update-ready');
+        }
+      });
+      setState('update-ready');
+    } catch (e) {
+      console.error('Download update error:', e);
+      setHasPendingUpdate(true);
+      setState(isPlaying ? 'ambient-active' : 'pure-idle');
+    }
+  };
+
+  const applyUpdateAndRestart = async () => {
+    if (updateObj) {
+      try {
+        await updateObj.install({ restartAfterInstall: true });
+      } catch (err) {
+        console.error('Install error:', err);
+      }
+    } else {
+      // Simulation: reset back to ambient
+      setState(isPlaying ? 'ambient-active' : 'pure-idle');
+      setHasPendingUpdate(false);
+    }
+  };
+
+  const dismissUpdateToast = () => {
+    if (updateToastTimerRef.current) clearTimeout(updateToastTimerRef.current);
+    setHasPendingUpdate(true);
+    setState(isPlaying ? 'ambient-active' : 'pure-idle');
+  };
+
   // Sync monitor mode whenever settings change
   useEffect(() => {
     invoke('set_monitor_mode', { mode: settings.monitorPlacement }).catch(console.error);
@@ -161,8 +293,23 @@ export const DynamicIsland: React.FC = () => {
         top = settings.verticalOffset;
         break;
       case 'ambient-active':
-        w = 192;
+        w = 204;
         h = 34;
+        top = settings.verticalOffset;
+        break;
+      case 'update-alert':
+        w = 375;
+        h = 48;
+        top = settings.verticalOffset;
+        break;
+      case 'update-downloading':
+        w = 330;
+        h = 44;
+        top = settings.verticalOffset;
+        break;
+      case 'update-ready':
+        w = 340;
+        h = 48;
         top = settings.verticalOffset;
         break;
       case 'transient-toast':
@@ -789,6 +936,27 @@ export const DynamicIsland: React.FC = () => {
           height: fromStealth ? '32px' : '36px',
           borderRadius: fromStealth ? '0px 0px 16px 16px' : '9999px',
         };
+      case 'update-alert':
+        return {
+          top: `${settings.verticalOffset}px`,
+          width: '375px',
+          height: '48px',
+          borderRadius: '24px',
+        };
+      case 'update-downloading':
+        return {
+          top: `${settings.verticalOffset}px`,
+          width: '330px',
+          height: '44px',
+          borderRadius: '22px',
+        };
+      case 'update-ready':
+        return {
+          top: `${settings.verticalOffset}px`,
+          width: '340px',
+          height: '48px',
+          borderRadius: '24px',
+        };
     }
   };
 
@@ -837,6 +1005,11 @@ export const DynamicIsland: React.FC = () => {
       {/* Dynamic Island Capsule */}
       <div
         id="islandCapsule"
+        onClick={() => {
+          if (hasPendingUpdate && (state === 'pure-idle' || state === 'ambient-active')) {
+            setState('update-alert');
+          }
+        }}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
         className={`relative ${
@@ -900,11 +1073,16 @@ export const DynamicIsland: React.FC = () => {
         {/* State 1: Pure Idle (Clock + Floating Wink Glyph) */}
         {state === 'pure-idle' && (
           <div className="w-full h-full flex items-center justify-center gap-2.5 px-3">
-            <WinkGlyph
-              width={26}
-              height={11}
-              color={isDark ? '#ffffff' : '#1c1f26'}
-            />
+            <div className="relative inline-flex items-center">
+              <WinkGlyph
+                width={26}
+                height={11}
+                color={isDark ? '#ffffff' : '#1c1f26'}
+              />
+              {hasPendingUpdate && (
+                <span className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-[0_0_8px_#38bdf8] animate-pulse" />
+              )}
+            </div>
             <span className="text-xs font-semibold tnum" style={{ color: textPrimary }}>
               {currentTime}
             </span>
@@ -935,16 +1113,116 @@ export const DynamicIsland: React.FC = () => {
         {state === 'ambient-active' && (
           <div className="w-full h-full flex items-center justify-between px-3">
             <div className="flex items-center gap-2">
-              <WinkGlyph
-                width={22}
-                height={10}
-                color={isDark ? '#ffffff' : '#1c1f26'}
-              />
+              <div className="relative inline-flex items-center">
+                <WinkGlyph
+                  width={22}
+                  height={10}
+                  color={isDark ? '#ffffff' : '#1c1f26'}
+                />
+                {hasPendingUpdate && (
+                  <span className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-[0_0_8px_#38bdf8] animate-pulse" />
+                )}
+              </div>
               <span className="text-xs font-semibold tnum" style={{ color: textPrimary }}>
                 {currentTime}
               </span>
             </div>
             <WaveCanvas width={52} height={18} isPlaying={isPlaying} theme={theme} />
+          </div>
+        )}
+
+        {/* State: Update Alert Toast */}
+        {state === 'update-alert' && (
+          <div className="w-full h-full flex items-center justify-between px-3 gap-2">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-7 h-7 rounded-lg bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center shrink-0 relative">
+                <WinkGlyph width={18} height={8} color="#38bdf8" />
+                <span className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
+              </div>
+              <div className="flex flex-col text-left min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-bold text-white tracking-tight truncate">
+                    Update {updateMeta?.version || 'v1.2.1'}
+                  </span>
+                  <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 shrink-0">
+                    Baru
+                  </span>
+                </div>
+                <span className="text-[10px] text-zinc-400 truncate max-w-[150px]">
+                  {updateMeta?.body || 'Sinkronisasi GSMTC & Spring Fisika'}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  startDownload();
+                }}
+                className="px-2.5 py-1.5 rounded-lg bg-white hover:bg-zinc-200 text-black font-semibold text-xs transition active:scale-95 flex items-center gap-1 shadow-sm"
+              >
+                <Download className="w-3.5 h-3.5 text-black" />
+                <span>Perbarui</span>
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  dismissUpdateToast();
+                }}
+                className="p-1 rounded-lg text-zinc-400 hover:text-white hover:bg-white/10 transition"
+                title="Ingatkan Nanti"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* State: Update Downloading HUD */}
+        {state === 'update-downloading' && (
+          <div className="w-full h-full flex flex-col justify-center px-3 gap-1">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-semibold text-white text-[11px] flex items-center gap-1.5">
+                <RotateCw className="w-3 h-3 text-cyan-400 animate-spin" />
+                Mengunduh {updateMeta?.version || 'v1.2.1'}
+              </span>
+              <span className="font-mono text-[10px] text-cyan-400 font-medium">
+                {downloadProgress.percent}% {downloadProgress.totalMb > 0 ? `(${downloadProgress.currentMb} / ${downloadProgress.totalMb} MB)` : ''}
+              </span>
+            </div>
+            <div className="w-full h-1.5 bg-white/15 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-cyan-400 to-emerald-400 rounded-full transition-all duration-200"
+                style={{ width: `${downloadProgress.percent}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* State: Update Ready to Restart */}
+        {state === 'update-ready' && (
+          <div className="w-full h-full flex items-center justify-between px-3 gap-2">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+                <Check className="w-4 h-4" />
+              </div>
+              <div className="text-left">
+                <div className="text-xs font-bold text-white">Unduhan Siap</div>
+                <div className="text-[10px] text-zinc-400">Klik restart untuk menerapkan</div>
+              </div>
+            </div>
+
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                applyUpdateAndRestart();
+              }}
+              className="px-3 py-1.5 rounded-lg bg-emerald-400 hover:bg-emerald-300 text-black font-semibold text-xs transition active:scale-95 flex items-center gap-1 shadow-sm shrink-0"
+            >
+              <RotateCw className="w-3.5 h-3.5" />
+              <span>Restart</span>
+            </button>
           </div>
         )}
 
