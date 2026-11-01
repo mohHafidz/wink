@@ -111,6 +111,16 @@ export const DynamicIsland: React.FC = () => {
   });
   const updateToastTimerRef = useRef<number | null>(null);
 
+  // Playful periodic winking animation for living Dynamic Island
+  const [isWinking, setIsWinking] = useState(false);
+  useEffect(() => {
+    const winkInterval = setInterval(() => {
+      setIsWinking(true);
+      setTimeout(() => setIsWinking(false), 700);
+    }, 14000);
+    return () => clearInterval(winkInterval);
+  }, []);
+
   // Listen for realtime cross-window Settings updates from SettingsWindow
   useEffect(() => {
     let unlistenFn: (() => void) | null = null;
@@ -1078,6 +1088,7 @@ export const DynamicIsland: React.FC = () => {
                 width={26}
                 height={11}
                 color={isDark ? '#ffffff' : '#1c1f26'}
+                isWinking={isWinking}
               />
               {hasPendingUpdate && (
                 <span className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-[0_0_8px_#38bdf8] animate-pulse" />
@@ -1118,6 +1129,7 @@ export const DynamicIsland: React.FC = () => {
                   width={22}
                   height={10}
                   color={isDark ? '#ffffff' : '#1c1f26'}
+                  isWinking={isWinking}
                 />
                 {hasPendingUpdate && (
                   <span className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-[0_0_8px_#38bdf8] animate-pulse" />
@@ -1136,7 +1148,7 @@ export const DynamicIsland: React.FC = () => {
           <div className="w-full h-full flex items-center justify-between px-3 gap-2">
             <div className="flex items-center gap-2.5 min-w-0">
               <div className="w-7 h-7 rounded-lg bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center shrink-0 relative">
-                <WinkGlyph width={18} height={8} color="#38bdf8" />
+                <WinkGlyph width={18} height={8} color="#38bdf8" isWinking={isWinking} />
                 <span className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
               </div>
               <div className="flex flex-col text-left min-w-0">
@@ -1237,23 +1249,28 @@ export const DynamicIsland: React.FC = () => {
             />
 
             {/* Title & Progress line */}
-            <div className="flex-1 min-w-0 flex flex-col justify-center">
-              <div className="flex items-center justify-between mb-0.5">
-                <span className="text-xs font-semibold truncate tracking-tight" style={{ color: textPrimary }}>
+            <div className="flex-1 min-w-0 flex flex-col justify-center gap-1">
+              <div className="w-full min-w-0">
+                <p className="text-xs font-semibold truncate tracking-tight m-0" style={{ color: textPrimary }}>
                   {currentTrack.title}
-                </span>
-                <span className="text-[10px] font-mono tnum" style={{ color: textMuted }}>
-                  {formatSeconds(progress)} / {formatSeconds(currentTrack.duration)}
-                </span>
+                </p>
               </div>
-              <div className="w-full h-1 bg-white/15 rounded-full overflow-hidden">
-                <div
-                  className="h-full rounded-full transition-all duration-150"
-                  style={{
-                    width: `${Math.min(100, (progress / currentTrack.duration) * 100)}%`,
-                    backgroundColor: getInkAccent(currentTrack.accent),
-                  }}
-                />
+              <div className="flex items-center gap-1.5 w-full">
+                <span className="text-[9px] font-mono tnum shrink-0" style={{ color: textMuted }}>
+                  {formatSeconds(progress)}
+                </span>
+                <div className="flex-1 h-1 bg-white/15 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all duration-150"
+                    style={{
+                      width: `${Math.min(100, (progress / currentTrack.duration) * 100)}%`,
+                      backgroundColor: getInkAccent(currentTrack.accent),
+                    }}
+                  />
+                </div>
+                <span className="text-[9px] font-mono tnum shrink-0" style={{ color: textMuted }}>
+                  {formatSeconds(currentTrack.duration)}
+                </span>
               </div>
             </div>
 
