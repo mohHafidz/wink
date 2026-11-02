@@ -16,8 +16,10 @@ import {
   VolumeX,
   Download,
   RotateCw,
+  GripVertical,
 } from 'lucide-react';
 import { check, Update } from '@tauri-apps/plugin-updater';
+import { startDrag } from '@crabnebula/tauri-plugin-drag';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
@@ -25,6 +27,9 @@ import { LifecycleState, Track, ShelfFile, ClipboardEntry, ThemeMode, MediaTrack
 import { getStoredSettings, fetchStoredSettings, SETTINGS_EVENT } from '../settingsStore';
 import { WaveCanvas } from './WaveCanvas';
 import { WinkGlyph } from './WinkGlyph';
+
+// 32x32 Cyan-bordered document preview icon for OS drag operations
+const SHELF_DRAG_ICON = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAtUlEQVR4nGNgGOmAEZ+kxd4f/6ll0QlnDqx2MdLaYkIOYcGn+HW21UdqWSw69Rg/NnEmXL6npuXI5qGHLhPDAAOmUQcwDDBgIaTgzvWzNyi1REXTWGPQhgDToI8CFTzBNyxCgGko5IINpBqqomkcMGRCgGko5IKAYR0CTIM+CkSnHntDSM3rbCuRIRsCTIM+Cl5TELxDIgSYBp0DTkA7Drja8eQCmHkkdUxEqeyIQdk3ZBhoAAD1dzDjQnz5ogAAAABJRU5ErkJggg==';
 
 const DEFAULT_PLAYLIST: Track[] = [
   {
@@ -843,6 +848,19 @@ export const DynamicIsland: React.FC = () => {
   };
 
   // --- Shelf File Actions ---
+  const handleStartDragFile = async (e: React.DragEvent<HTMLDivElement>, file: ShelfFile) => {
+    e.preventDefault();
+    if (!file.path) return;
+    try {
+      await startDrag({
+        item: [file.path],
+        icon: SHELF_DRAG_ICON,
+      });
+    } catch (err) {
+      console.error('Failed to drag out file from shelf:', err);
+    }
+  };
+
   const handleRevealInExplorer = async (filePath?: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
     if (!filePath) return;
@@ -1450,12 +1468,20 @@ export const DynamicIsland: React.FC = () => {
                 {shelfFiles.map((file) => (
                   <div
                     key={file.id}
-                    className="group relative flex items-center gap-2 p-1.5 rounded-xl transition cursor-default shadow-sm"
+                    draggable
+                    onDragStart={(e) => handleStartDragFile(e, file)}
+                    className="group relative flex items-center gap-1.5 p-1.5 rounded-xl transition cursor-grab active:cursor-grabbing hover:border-teal-400/40 hover:bg-white/[0.05] select-none shadow-sm"
                     style={{ background: cardBg, border: `1px solid ${cardBorder}` }}
+                    title="Tarik berkas keluar untuk gunakan di File Explorer, Desktop, atau aplikasi lain"
                   >
+                    {/* Drag Grip indicator */}
+                    <div className="opacity-30 group-hover:opacity-80 transition text-zinc-400 shrink-0">
+                      <GripVertical className="w-3 h-3" />
+                    </div>
+
                     {/* Extension Badge */}
                     <div
-                      className="w-7 h-7 rounded-lg flex items-center justify-center font-mono font-bold text-[9px] shrink-0"
+                      className="w-7 h-7 rounded-lg flex items-center justify-center font-mono font-bold text-[9px] shrink-0 pointer-events-none"
                       style={{
                         background: `${file.color}${isDark ? '20' : '33'}`,
                         color: isDark ? file.color : getInkAccent(file.color),
@@ -1465,7 +1491,7 @@ export const DynamicIsland: React.FC = () => {
                     </div>
 
                     {/* File Info */}
-                    <div className="min-w-0 flex-1">
+                    <div className="min-w-0 flex-1 pointer-events-none">
                       <p className="text-[11px] font-medium truncate" style={{ color: textPrimary }}>
                         {file.name}
                       </p>
@@ -1475,7 +1501,7 @@ export const DynamicIsland: React.FC = () => {
                     </div>
 
                     {/* Action buttons on card hover */}
-                    <div className="flex items-center gap-0.5 shrink-0">
+                    <div className="flex items-center gap-0.5 shrink-0" onMouseDown={(e) => e.stopPropagation()}>
                       {file.path && (
                         <button
                           onClick={(e) => handleRevealInExplorer(file.path, e)}
@@ -1508,12 +1534,15 @@ export const DynamicIsland: React.FC = () => {
               className="flex items-center justify-between text-[11px] pt-1"
               style={{ borderTop: `1px solid ${cardBorderSubtle}`, color: textMuted }}
             >
-              <span>Transit hub berkas sementara</span>
+              <span className="flex items-center gap-1">
+                <GripVertical className="w-3 h-3 text-teal-400/80 inline" />
+                Tarik keluar berkas untuk gunakan
+              </span>
               <span
                 className="text-[10px] font-mono"
                 style={{ color: isDark ? 'rgba(45, 212, 191, 0.8)' : '#0d9488' }}
               >
-                Drag & Drop ke Wink
+                Drag-in / Drag-out
               </span>
             </div>
           </div>

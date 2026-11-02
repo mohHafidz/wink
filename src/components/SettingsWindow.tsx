@@ -40,7 +40,7 @@ export const SettingsWindow: React.FC<SettingsProps> = ({ onClose }) => {
           body: update.body || 'Pembaruan resmi Wink',
         });
       } else {
-        setUpdateStatus('Aplikasi Anda sudah menggunakan versi terbaru (v1.2.2).');
+        setUpdateStatus('Aplikasi Anda sudah menggunakan versi terbaru (v1.2.3).');
       }
     } catch {
       setUpdateStatus('Tidak dapat terhubung ke server update saat ini.');
@@ -51,8 +51,8 @@ export const SettingsWindow: React.FC<SettingsProps> = ({ onClose }) => {
 
   const handleSimulateNotchAlert = async () => {
     emit('wink-trigger-update-alert', {
-      version: 'v1.2.2',
-      body: 'Pembaruan UI/UX Wink: Animasi Kedip & Indikator Musik Dinamis',
+      version: 'v1.2.3',
+      body: 'Pembaruan Fitur: Dukungan Penuh Drag-Off Berkas Shelf ke Seluruh Aplikasi Windows',
     });
   };
 
@@ -196,7 +196,7 @@ export const SettingsWindow: React.FC<SettingsProps> = ({ onClose }) => {
           </div>
 
           <div className="px-2 pt-2 border-t border-white/[0.06] text-[10px] text-white/40 flex items-center justify-between">
-            <span>v1.2.2</span>
+            <span>v1.2.3</span>
             <span className="text-teal-400">Tauri v2</span>
           </div>
         </aside>
@@ -507,7 +507,7 @@ export const SettingsWindow: React.FC<SettingsProps> = ({ onClose }) => {
                   <div>
                     <div className="text-[11px] font-mono text-white/50">Versi Terpasang</div>
                     <div className="text-sm font-bold text-white font-mono flex items-center gap-2 mt-0.5">
-                      <span>v1.2.2-stable</span>
+                      <span>v1.2.3-stable</span>
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                         Aktif
                       </span>
