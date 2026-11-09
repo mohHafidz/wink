@@ -12,6 +12,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
     WINDOWPLACEMENT, SW_SHOWMAXIMIZED,
 };
+use windows::Win32::UI::Shell::{SHQueryUserNotificationState, QUNS_RUNNING_D3D_FULL_SCREEN};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MonitorDetails {
@@ -32,7 +33,23 @@ pub enum MonitorTargetMode {
 static TARGET_MODE: Mutex<MonitorTargetMode> = Mutex::new(MonitorTargetMode::Auto);
 static CURRENT_MONITOR_IDX: AtomicUsize = AtomicUsize::new(0);
 static FOREGROUND_MAXIMIZED: AtomicBool = AtomicBool::new(false);
+static IS_FULLSCREEN_GAME: AtomicBool = AtomicBool::new(false);
 static CAPSULE_RECT: Mutex<(i32, i32, i32, i32)> = Mutex::new((235, 8, 130, 34));
+
+/// Checks if Windows detects an active full-screen DirectX/3D game (e.g. Valorant, CS2, etc.)
+pub fn is_d3d_game_running() -> bool {
+    unsafe {
+        if let Ok(state) = SHQueryUserNotificationState() {
+            state == QUNS_RUNNING_D3D_FULL_SCREEN
+        } else {
+            false
+        }
+    }
+}
+
+pub fn get_game_fullscreen_status() -> bool {
+    IS_FULLSCREEN_GAME.load(Ordering::Relaxed)
+}
 
 pub fn update_capsule_bounds(x: i32, y: i32, width: i32, height: i32) {
     let mut lock = CAPSULE_RECT.lock().unwrap();
@@ -87,6 +104,15 @@ pub fn is_foreground_window_maximized(our_hwnd: isize) -> bool {
         // This ensures the Island stays neatly tucked away in Stealth Micro-Pill when opening Start/Taskbar over maximized apps.
         if is_windows_shell_window(fg_hwnd) {
             return FOREGROUND_MAXIMIZED.load(Ordering::Relaxed);
+        }
+
+        // 0. Check D3D fullscreen game state (e.g. Valorant, Apex, CS2)
+        if is_d3d_game_running() {
+            IS_FULLSCREEN_GAME.store(true, Ordering::Relaxed);
+            FOREGROUND_MAXIMIZED.store(true, Ordering::Relaxed);
+            return true;
+        } else {
+            IS_FULLSCREEN_GAME.store(false, Ordering::Relaxed);
         }
 
         // 1. Check Win32 standard maximized flag (SW_SHOWMAXIMIZED)
@@ -223,9 +249,12 @@ pub fn start_monitor_follower(app: tauri::AppHandle) {
             zorder_tick = zorder_tick.wrapping_add(1);
 
             if let Some(window) = app.get_webview_window("main") {
+                let is_game = is_d3d_game_running();
+                IS_FULLSCREEN_GAME.store(is_game, Ordering::Relaxed);
+
                 // Periodic Z-Order enforcement (every 500ms / 10 ticks):
-                // Guarantees Island-Win never sinks beneath newly opened maximized or fullscreen apps
-                if zorder_tick % 10 == 0 {
+                // Guarantees Island-Win never sinks beneath desktop apps, but does not fight full-screen 3D games
+                if !is_game && zorder_tick % 10 == 0 {
                     if let Ok(raw_hwnd) = window.hwnd() {
                         enforce_window_topmost(raw_hwnd);
                     }
@@ -240,11 +269,19 @@ pub fn start_monitor_follower(app: tauri::AppHandle) {
                         let client_x = ((pt.x - win_pos.x) as f64 / scale).round() as i32;
                         let client_y = ((pt.y - win_pos.y) as f64 / scale).round() as i32;
 
-                        let is_inside = is_point_inside_capsule(client_x, client_y);
+                        // Solusi 1 - Ghost / Passthrough Mode saat Fullscreen Game:
+                        // Ketika game 3D (seperti Valorant) aktif, kursor dipaksa tembus 100% (is_inside = false).
+                        // Notch tidak akan menangkap hover ataupun mengganggu gameplay user.
+                        let is_inside = if is_game {
+                            false
+                        } else {
+                            is_point_inside_capsule(client_x, client_y)
+                        };
+
                         if is_inside != was_inside_capsule {
                             was_inside_capsule = is_inside;
-                            // When outside: mouse passes 100% through to Spotify / browser tabs!
-                            // When inside: window catches cursor events immediately (hover & clicks work 100%)!
+                            // When outside (or in game): mouse passes 100% through to game/app!
+                            // When inside (and not in game): window catches cursor events immediately!
                             let _ = window.set_ignore_cursor_events(!is_inside);
                         }
                     }

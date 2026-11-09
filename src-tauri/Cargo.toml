@@ -1,6 +1,6 @@
 [package]
 name = "wink"
-version = "1.2.4"
+version = "1.2.5"
 description = "Wink - The Dynamic Notch for Windows 11"
 authors = ["you"]
 edition = "2024"
@@ -37,6 +37,7 @@ windows = { version = "0.62", features = [
     "Win32_Graphics_Gdi",
     "Win32_Media_Audio",
     "Win32_Media_Audio_Endpoints",
+    "Win32_UI_Shell",
 ] }
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

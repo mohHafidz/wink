@@ -89,6 +89,7 @@ export const DynamicIsland: React.FC = () => {
   const [liveTrack, setLiveTrack] = useState<Track | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [isForegroundMax, setIsForegroundMax] = useState(false);
+  const [isGameFullscreen, setIsGameFullscreen] = useState(false);
   const [isStealthPeeking, setIsStealthPeeking] = useState(false);
   const [currentVolume, setCurrentVolume] = useState<number>(64);
   const [previousNonVolumeState, setPreviousNonVolumeState] = useState<LifecycleState>('pure-idle');
@@ -549,12 +550,20 @@ export const DynamicIsland: React.FC = () => {
     let isMounted = true;
     const checkMaximized = async () => {
       try {
-        const isMax = await invoke<boolean>('is_foreground_maximized');
+        const [isMax, isGame] = await Promise.all([
+          invoke<boolean>('is_foreground_maximized'),
+          invoke<boolean>('is_game_fullscreen'),
+        ]);
         if (!isMounted) return;
         setIsForegroundMax(isMax);
+        setIsGameFullscreen(isGame);
 
-        // Auto transition into stealth-micro when maximized and not interacted
+        // Auto transition into stealth-micro when maximized/gaming and not interacted
         setState((curr) => {
+          if (isGame) {
+            // When playing 3D full-screen game, lock into stealth-micro immediately!
+            return 'stealth-micro';
+          }
           if (settings.autoStealth && isMax) {
             // When user is not hovering capsule or opened a drawer or seeing transient toast
             if (curr === 'pure-idle' || (curr === 'ambient-active' && !isCapsuleHoveredRef.current)) {
@@ -568,7 +577,7 @@ export const DynamicIsland: React.FC = () => {
           }
           return curr;
         });
-      } catch (err) {
+      } catch {
         // Fallback gracefully
       }
     };
@@ -584,6 +593,9 @@ export const DynamicIsland: React.FC = () => {
   // Global cursor listener for Edge-Proximity Wake Gesture
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
+      // Solusi 1: Jangan bangunkan / trigger edgeWake jika sedang bermain game fullscreen
+      if (isGameFullscreen) return;
+
       // Jika kursor sedang berada di dalam kapsul Island, jangan pernah paksa menutup!
       if (isCapsuleHoveredRef.current) {
         if (stealthRestoreRef.current) clearTimeout(stealthRestoreRef.current);
@@ -623,7 +635,7 @@ export const DynamicIsland: React.FC = () => {
       window.removeEventListener('mousemove', handleMouseMove);
       if (stealthRestoreRef.current) clearTimeout(stealthRestoreRef.current);
     };
-  }, [isForegroundMax, isPlaying, settings.edgeWake, settings.autoStealth]);
+  }, [isForegroundMax, isGameFullscreen, isPlaying, settings.edgeWake, settings.autoStealth]);
 
   // Tauri native Window Drag & Drop Event Listener
   useEffect(() => {
@@ -717,6 +729,9 @@ export const DynamicIsland: React.FC = () => {
 
   // --- Hover interaction handlers with 80ms intent guard ---
   const handleMouseEnter = () => {
+    // Solusi 1: Jika sedang dalam game fullscreen, abaikan total event mouse hover
+    if (isGameFullscreen) return;
+
     isCapsuleHoveredRef.current = true;
     if (stealthRestoreRef.current) clearTimeout(stealthRestoreRef.current);
     if (stealthPulseTimeoutRef.current) clearTimeout(stealthPulseTimeoutRef.current);
@@ -912,7 +927,8 @@ export const DynamicIsland: React.FC = () => {
           width: isStealthPeeking ? '76px' : '56px',
           height: isStealthPeeking ? '16px' : '6px',
           borderRadius: '0px 0px 8px 8px',
-          opacity: 1,
+          opacity: isGameFullscreen ? 0.35 : 1,
+          pointerEvents: isGameFullscreen ? 'none' : 'auto',
         };
       case 'pure-idle':
         return {

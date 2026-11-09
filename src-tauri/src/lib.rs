@@ -95,6 +95,11 @@ fn is_foreground_maximized() -> bool {
 }
 
 #[tauri::command]
+fn is_game_fullscreen() -> bool {
+    monitor::get_game_fullscreen_status()
+}
+
+#[tauri::command]
 fn update_capsule_bounds(x: i32, y: i32, width: i32, height: i32) {
     monitor::update_capsule_bounds(x, y, width, height);
 }
@@ -188,6 +193,7 @@ pub fn run() {
             set_monitor_mode,
             get_monitor_mode,
             is_foreground_maximized,
+            is_game_fullscreen,
             update_capsule_bounds,
             get_volume_status,
             open_settings_window,
