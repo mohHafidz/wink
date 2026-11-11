@@ -3,6 +3,14 @@ use std::fs;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
+fn default_true() -> bool {
+    true
+}
+
+fn default_color_picker_shortcut() -> String {
+    "Ctrl+Shift+C".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
@@ -16,6 +24,10 @@ pub struct AppSettings {
     pub volume_duration: i32,      // e.g. 1400
     pub monitor_placement: String, // "auto" | "fixed"
     pub auto_start: bool,          // true/false
+    #[serde(default = "default_true")]
+    pub color_picker_shortcut_enabled: bool,
+    #[serde(default = "default_color_picker_shortcut")]
+    pub color_picker_shortcut: String,
 }
 
 impl Default for AppSettings {
@@ -31,6 +43,8 @@ impl Default for AppSettings {
             volume_duration: 1400,
             monitor_placement: "auto".to_string(),
             auto_start: false,
+            color_picker_shortcut_enabled: true,
+            color_picker_shortcut: "Ctrl+Shift+C".to_string(),
         }
     }
 }

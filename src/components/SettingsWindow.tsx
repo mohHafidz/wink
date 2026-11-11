@@ -7,8 +7,8 @@ import {
   Volume2,
   Power,
   Check,
-  X,
   RotateCw,
+  Pipette,
 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { emit } from '@tauri-apps/api/event';
@@ -26,6 +26,8 @@ export const SettingsWindow: React.FC<SettingsProps> = ({ onClose }) => {
   const [isSavedNotice, setIsSavedNotice] = useState<boolean>(false);
   const [isCheckingUpdate, setIsCheckingUpdate] = useState<boolean>(false);
   const [updateStatus, setUpdateStatus] = useState<string | null>(null);
+  const [isRecordingShortcut, setIsRecordingShortcut] = useState<boolean>(false);
+  const [recordedKeys, setRecordedKeys] = useState<string[]>([]);
 
   const handleCheckUpdate = async () => {
     setIsCheckingUpdate(true);
@@ -73,13 +75,72 @@ export const SettingsWindow: React.FC<SettingsProps> = ({ onClose }) => {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && !isRecordingShortcut) {
         handleClose();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [isRecordingShortcut]);
+
+  // Hotkey Recorder Effect
+  useEffect(() => {
+    if (!isRecordingShortcut) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (e.key === 'Escape') {
+        setIsRecordingShortcut(false);
+        setRecordedKeys([]);
+        return;
+      }
+
+      const parts: string[] = [];
+      if (e.ctrlKey) parts.push('Ctrl');
+      if (e.shiftKey) parts.push('Shift');
+      if (e.altKey) parts.push('Alt');
+      if (e.metaKey) parts.push('Win');
+
+      const rawKey = e.key.toUpperCase();
+      if (!['CONTROL', 'SHIFT', 'ALT', 'META'].includes(rawKey)) {
+        let cleanKey = rawKey;
+        if (e.code.startsWith('Key')) cleanKey = e.code.replace('Key', '');
+        else if (e.code.startsWith('Digit')) cleanKey = e.code.replace('Digit', '');
+        else if (rawKey === ' ') cleanKey = 'Space';
+
+        // Ensure at least one modifier key is used, or allow function keys F1-F12
+        if (parts.length === 0 && !cleanKey.startsWith('F')) {
+          parts.push('Ctrl');
+        }
+
+        parts.push(cleanKey);
+        const finalShortcut = parts.join('+');
+        updateSetting('colorPickerShortcut', finalShortcut);
+        setIsRecordingShortcut(false);
+        setRecordedKeys([]);
+      } else {
+        setRecordedKeys(parts);
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      const parts: string[] = [];
+      if (e.ctrlKey) parts.push('Ctrl');
+      if (e.shiftKey) parts.push('Shift');
+      if (e.altKey) parts.push('Alt');
+      if (e.metaKey) parts.push('Win');
+      setRecordedKeys(parts);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [isRecordingShortcut]);
 
   const showSavedFlash = () => {
     setIsSavedNotice(true);
@@ -96,33 +157,9 @@ export const SettingsWindow: React.FC<SettingsProps> = ({ onClose }) => {
   };
 
   return (
-    <div className="w-full h-screen bg-[#1c1d22] text-[#f3f4f6] flex flex-col select-none overflow-hidden font-sans">
-      {/* Titlebar */}
-      <div className="h-9 bg-black/30 border-b border-white/[0.06] flex items-center justify-between px-3.5 select-none" data-tauri-drag-region>
-        <div className="flex items-center gap-2 pointer-events-none">
-          <img src="/wink-logo.svg" className="w-4 h-4 rounded object-contain shadow-sm" alt="Wink Logo" />
-          <span className="text-xs font-semibold text-white/85">Pengaturan Wink</span>
-        </div>
-        <div className="flex items-center gap-2">
-          {isSavedNotice && (
-            <div className="flex items-center gap-1 text-[11px] text-teal-400 font-medium animate-pulse">
-              <Check className="w-3.5 h-3.5" />
-              <span>Tersimpan</span>
-            </div>
-          )}
-          <button
-            onClick={handleClose}
-            className="w-6 h-6 rounded flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 transition active:scale-95"
-            title="Tutup (Esc)"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
-
-      <div className="flex-1 flex overflow-hidden">
-        {/* Sidebar Nav */}
-        <aside className="w-48 bg-black/20 border-r border-white/[0.06] p-2.5 flex flex-col justify-between">
+    <div className="w-full h-screen bg-[#1c1d22] text-[#f3f4f6] flex select-none overflow-hidden font-sans">
+      {/* Sidebar Nav */}
+      <aside className="w-48 bg-black/20 border-r border-white/[0.06] p-2.5 flex flex-col justify-between">
           <div className="space-y-1">
             <div className="text-[10px] font-semibold text-white/40 uppercase tracking-wider px-2 py-1">Kategori</div>
             
@@ -189,12 +226,17 @@ export const SettingsWindow: React.FC<SettingsProps> = ({ onClose }) => {
 
           <div className="px-2 pt-2 border-t border-white/[0.06] text-[10px] text-white/40 flex items-center justify-between">
             <span>v1.2.5</span>
-            <span className="text-teal-400">Tauri v2</span>
           </div>
         </aside>
 
         {/* Content Canvas */}
-        <main className="flex-1 p-5 overflow-y-auto space-y-4">
+        <main className="flex-1 p-5 overflow-y-auto space-y-4 relative">
+          {isSavedNotice && (
+            <div className="fixed top-3 right-5 z-50 flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30 backdrop-blur-md font-medium animate-in fade-in duration-200 shadow-lg">
+              <Check className="w-3.5 h-3.5" />
+              <span>Tersimpan</span>
+            </div>
+          )}
           {/* TAB 1: TAMPILAN */}
           {activeTab === 'tampilan' && (
             <div className="space-y-4">
@@ -354,6 +396,116 @@ export const SettingsWindow: React.FC<SettingsProps> = ({ onClose }) => {
                   onChange={(e) => updateSetting('inPlaceTrack', e.target.checked)}
                   className="w-4 h-4 accent-teal-400 cursor-pointer"
                 />
+              </div>
+
+              {/* Pintasan Cepat Color Picker (Eyedropper) */}
+              <div className="bg-white/[0.04] border border-white/[0.06] rounded-xl p-3.5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="pr-4">
+                    <div className="text-xs font-semibold text-white/90 flex items-center gap-1.5">
+                      <Pipette className="w-3.5 h-3.5 text-purple-400" />
+                      <span>Pintasan Cepat Color Picker (Eyedropper)</span>
+                    </div>
+                    <div className="text-[11px] text-white/50 mt-0.5">
+                      Aktifkan shortcut keyboard untuk langsung mengambil warna dari layar ke palet.
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={settings.colorPickerShortcutEnabled}
+                    onChange={(e) => updateSetting('colorPickerShortcutEnabled', e.target.checked)}
+                    className="w-4 h-4 accent-purple-400 cursor-pointer"
+                  />
+                </div>
+
+                {settings.colorPickerShortcutEnabled && (
+                  <div className="pt-2.5 border-t border-white/[0.06] flex flex-col gap-2.5">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-xs font-medium text-white/80">Kombinasi Tombol Pintasan</div>
+                        <div className="text-[10px] text-white/40 mt-0.5">
+                          {isRecordingShortcut
+                            ? 'Tekan tombol di keyboard Anda sekarang...'
+                            : 'Klik tombol di kanan untuk merekam shortcut baru'}
+                        </div>
+                      </div>
+
+                      {/* Hotkey Keycap Recorder Pill */}
+                      {!isRecordingShortcut ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsRecordingShortcut(true);
+                            setRecordedKeys([]);
+                          }}
+                          className="group flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-black/40 hover:bg-black/60 border border-white/10 hover:border-purple-400/50 transition cursor-pointer shadow-inner active:scale-95"
+                          title="Klik untuk merekam kombinasi tombol baru"
+                        >
+                          {(settings.colorPickerShortcut || 'Ctrl+Shift+C').split('+').map((k, i, arr) => (
+                            <React.Fragment key={`${k}-${i}`}>
+                              <kbd className="px-2 py-0.5 rounded bg-white/10 group-hover:bg-purple-500/20 border border-white/15 group-hover:border-purple-400/40 text-[11px] font-mono font-semibold text-white/90 group-hover:text-purple-300 shadow-sm transition">
+                                {k}
+                              </kbd>
+                              {i < arr.length - 1 && (
+                                <span className="text-[10px] text-white/30">+</span>
+                              )}
+                            </React.Fragment>
+                          ))}
+                          <span className="ml-1 text-[10px] font-medium text-white/40 group-hover:text-purple-400">
+                            Ubah
+                          </span>
+                        </button>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-500/15 border border-purple-400/60 ring-2 ring-purple-500/30 animate-pulse">
+                            {recordedKeys.length > 0 ? (
+                              recordedKeys.map((k, i) => (
+                                <React.Fragment key={`${k}-${i}`}>
+                                  <kbd className="px-2 py-0.5 rounded bg-purple-500/30 border border-purple-400/60 text-[11px] font-mono font-semibold text-purple-200 shadow-sm">
+                                    {k}
+                                  </kbd>
+                                  <span className="text-[10px] text-purple-300">+</span>
+                                </React.Fragment>
+                              ))
+                            ) : null}
+                            <span className="text-[11px] font-mono text-purple-200">
+                              {recordedKeys.length > 0 ? 'Tekan tombol...' : 'Tekan tombol kombinasi...'}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsRecordingShortcut(false);
+                              setRecordedKeys([]);
+                            }}
+                            className="text-[10px] text-white/50 hover:text-white px-2 py-1 rounded hover:bg-white/10 transition cursor-pointer"
+                          >
+                            Batal (Esc)
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Quick Presets */}
+                    <div className="flex items-center gap-1.5 pt-1">
+                      <span className="text-[10px] text-white/40">Preset Cepat:</span>
+                      {['Ctrl+Shift+C', 'Alt+C', 'Ctrl+Alt+C', 'Ctrl+Shift+X'].map((preset) => (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => updateSetting('colorPickerShortcut', preset)}
+                          className={`text-[10px] font-mono px-2 py-0.5 rounded-md border transition cursor-pointer ${
+                            settings.colorPickerShortcut === preset
+                              ? 'bg-purple-500/25 border-purple-400/60 text-purple-200 shadow-[0_0_8px_rgba(168,85,247,0.3)]'
+                              : 'bg-white/[0.03] border-white/10 text-white/60 hover:text-white hover:bg-white/10'
+                          }`}
+                        >
+                          {preset}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -529,7 +681,6 @@ export const SettingsWindow: React.FC<SettingsProps> = ({ onClose }) => {
             </div>
           )}
         </main>
-      </div>
     </div>
   );
 };

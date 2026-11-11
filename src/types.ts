@@ -5,6 +5,7 @@ export type LifecycleState =
   | 'hover-media'
   | 'pinned-shelf'
   | 'pinned-clip'
+  | 'pinned-palette'
   | 'stealth-micro'
   | 'volume-hud'
   | 'update-alert'
@@ -75,6 +76,8 @@ export interface AppSettings {
   volumeDuration: number; // e.g. 1400 ms
   monitorPlacement: 'auto' | 'fixed';
   autoStart: boolean;
+  colorPickerShortcutEnabled: boolean;
+  colorPickerShortcut: string;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -88,4 +91,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   volumeDuration: 1400,
   monitorPlacement: 'auto',
   autoStart: false,
+  colorPickerShortcutEnabled: true,
+  colorPickerShortcut: 'Ctrl+Shift+C',
 };

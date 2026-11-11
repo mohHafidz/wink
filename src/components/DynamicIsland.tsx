@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   ChevronLeft,
+  ChevronRight,
   FolderDown,
   Clipboard,
   Play,
@@ -11,12 +12,16 @@ import {
   ExternalLink,
   Trash2,
   Check,
-  Settings,
   Volume2,
   VolumeX,
   Download,
   RotateCw,
   GripVertical,
+  Headphones,
+  Tv,
+  Pipette,
+  Plus,
+  Palette,
 } from 'lucide-react';
 import { check, Update } from '@tauri-apps/plugin-updater';
 import { startDrag } from '@crabnebula/tauri-plugin-drag';
@@ -65,6 +70,63 @@ const INITIAL_CLIPBOARD: ClipboardEntry[] = [
   { id: 'c4', item_type: 'TEXT', content: 'git commit -m "feat: fluid spring physics"', time: '18m lalu' },
 ];
 
+export interface AudioDevice {
+  id: string;
+  name: string;
+  shortName: string;
+  type: 'headphone' | 'speaker' | 'display';
+}
+
+const DEFAULT_AUDIO_DEVICES: AudioDevice[] = [
+  { id: 'dev-headphone', name: 'HyperX Cloud II Wireless', shortName: 'HyperX Cloud II', type: 'headphone' },
+  { id: 'dev-speaker', name: 'Realtek High Definition Audio', shortName: 'Speakers', type: 'speaker' },
+  { id: 'dev-display', name: 'LG 27UP850 4K (NVIDIA HD)', shortName: 'LG Display', type: 'display' },
+];
+
+function getSectorPath(
+  cx: number,
+  cy: number,
+  rInner: number,
+  rOuter: number,
+  startAngleDeg: number,
+  endAngleDeg: number
+): string {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const startRad = toRad(startAngleDeg);
+  const endRad = toRad(endAngleDeg);
+
+  const x1 = cx + rOuter * Math.cos(startRad);
+  const y1 = cy + rOuter * Math.sin(startRad);
+  const x2 = cx + rOuter * Math.cos(endRad);
+  const y2 = cy + rOuter * Math.sin(endRad);
+
+  const x3 = cx + rInner * Math.cos(endRad);
+  const y3 = cy + rInner * Math.sin(endRad);
+  const x4 = cx + rInner * Math.cos(startRad);
+  const y4 = cy + rInner * Math.sin(startRad);
+
+  const largeArcFlag = endAngleDeg - startAngleDeg > 180 ? 1 : 0;
+
+  return `M ${x1} ${y1} A ${rOuter} ${rOuter} 0 ${largeArcFlag} 1 ${x2} ${y2} L ${x3} ${y3} A ${rInner} ${rInner} 0 ${largeArcFlag} 0 ${x4} ${y4} Z`;
+}
+
+export interface PaletteColor {
+  hex: string;
+  name: string;
+  tailwind: string;
+}
+
+export const DEFAULT_PALETTE: PaletteColor[] = [
+  { hex: '#2DD4BF', name: 'Teal Mint', tailwind: 'teal-400' },
+  { hex: '#38BDF8', name: 'Sky Cyan', tailwind: 'sky-400' },
+  { hex: '#818CF8', name: 'Soft Indigo', tailwind: 'indigo-400' },
+  { hex: '#C084FC', name: 'Purple Neon', tailwind: 'purple-400' },
+  { hex: '#F43F5E', name: 'Rose Coral', tailwind: 'rose-500' },
+  { hex: '#FB923C', name: 'Warm Orange', tailwind: 'orange-400' },
+  { hex: '#FACC15', name: 'Sun Amber', tailwind: 'amber-400' },
+  { hex: '#4ADE80', name: 'Emerald', tailwind: 'emerald-400' },
+];
+
 export const DynamicIsland: React.FC = () => {
   const [state, setState] = useState<LifecycleState>('pure-idle');
   const [settings, setSettings] = useState<AppSettings>(() => getStoredSettings());
@@ -77,16 +139,49 @@ export const DynamicIsland: React.FC = () => {
     : settings.themeMode === 'dark';
   const theme: ThemeMode = isDark ? 'dark' : 'light';
 
+  const isTauriEnv = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
   const [playlist] = useState<Track[]>(DEFAULT_PLAYLIST);
   const [trackIdx, setTrackIdx] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(() => !isTauriEnv);
   const [progress, setProgress] = useState(134);
   const [shelfFiles, setShelfFiles] = useState<ShelfFile[]>([]);
   const [clipboard, setClipboard] = useState<ClipboardEntry[]>(INITIAL_CLIPBOARD);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState('11:18');
   const [isGsmtcActive, setIsGsmtcActive] = useState(false);
-  const [liveTrack, setLiveTrack] = useState<Track | null>(null);
+  const [liveTrack, setLiveTrack] = useState<Track | null>(() => !isTauriEnv ? DEFAULT_PLAYLIST[0] : null);
+  const [audioDevices] = useState<AudioDevice[]>(DEFAULT_AUDIO_DEVICES);
+  const [activeDeviceId, setActiveDeviceId] = useState<string>('dev-headphone');
+  const [isRadialDialOpen, setIsRadialDialOpen] = useState(false);
+  const [hoveredRadialSector, setHoveredRadialSector] = useState<string | null>(null);
+  const [audioFeedbackNotice, setAudioFeedbackNotice] = useState<string | null>(null);
+  const [palette, setPalette] = useState<PaletteColor[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('wink_palette');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed)) return parsed;
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    return [];
+  });
+  const [activePaletteIdx, setActivePaletteIdx] = useState(0);
+  const [isPaletteHovered, setIsPaletteHovered] = useState(false);
+  const [copiedPaletteHex, setCopiedPaletteHex] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('wink_palette', JSON.stringify(palette));
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }, [palette]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [isForegroundMax, setIsForegroundMax] = useState(false);
   const [isGameFullscreen, setIsGameFullscreen] = useState(false);
@@ -117,6 +212,18 @@ export const DynamicIsland: React.FC = () => {
   });
   const updateToastTimerRef = useRef<number | null>(null);
 
+  const activeDevice = audioDevices.find((d) => d.id === activeDeviceId) || audioDevices[0];
+  const renderDeviceIcon = (type: AudioDevice['type'], className = 'w-3.5 h-3.5') => {
+    switch (type) {
+      case 'headphone':
+        return <Headphones className={className} />;
+      case 'speaker':
+        return <Volume2 className={className} />;
+      case 'display':
+        return <Tv className={className} />;
+    }
+  };
+
   // Playful periodic winking animation for living Dynamic Island
   const [isWinking, setIsWinking] = useState(false);
   useEffect(() => {
@@ -131,18 +238,20 @@ export const DynamicIsland: React.FC = () => {
   useEffect(() => {
     let unlistenFn: (() => void) | null = null;
 
-    // Muat konfigurasi tersimpan dari disk backend Rust saat startup
-    fetchStoredSettings().then((fresh) => {
-      setSettings(fresh);
-    });
+    if (isTauriEnv) {
+      // Muat konfigurasi tersimpan dari disk backend Rust saat startup
+      fetchStoredSettings().then((fresh) => {
+        setSettings(fresh);
+      });
 
-    listen<AppSettings>(SETTINGS_EVENT, (event) => {
-      if (event.payload) {
-        setSettings(event.payload);
-      }
-    }).then((unlisten) => {
-      unlistenFn = unlisten;
-    }).catch(console.error);
+      listen<AppSettings>(SETTINGS_EVENT, (event) => {
+        if (event.payload) {
+          setSettings(event.payload);
+        }
+      }).then((unlisten) => {
+        unlistenFn = unlisten;
+      }).catch(console.error);
+    }
 
     const handleStorage = () => {
       setSettings(getStoredSettings());
@@ -163,6 +272,7 @@ export const DynamicIsland: React.FC = () => {
 
   // Listen for manual trigger from Settings window & Check updates on startup
   useEffect(() => {
+    if (!isTauriEnv) return;
     let unlistenSim: (() => void) | null = null;
     listen<{ version?: string; body?: string }>('wink-trigger-update-alert', (event) => {
       setUpdateMeta({
@@ -281,7 +391,9 @@ export const DynamicIsland: React.FC = () => {
 
   // Sync monitor mode whenever settings change
   useEffect(() => {
-    invoke('set_monitor_mode', { mode: settings.monitorPlacement }).catch(console.error);
+    if (isTauriEnv) {
+      invoke('set_monitor_mode', { mode: settings.monitorPlacement }).catch(console.error);
+    }
   }, [settings.monitorPlacement]);
 
   // Sync animation duration to root CSS variable for global spring physics
@@ -335,17 +447,18 @@ export const DynamicIsland: React.FC = () => {
         break;
       case 'hover-media':
         w = 456;
-        h = 64;
+        h = 184;
         top = 0;
         break;
       case 'pinned-shelf':
-        w = 470;
-        h = 180;
+        w = 456;
+        h = 184;
         top = 0;
         break;
       case 'pinned-clip':
-        w = 430;
-        h = 180;
+      case 'pinned-palette':
+        w = 456;
+        h = 184;
         top = 0;
         break;
       case 'volume-hud':
@@ -357,10 +470,12 @@ export const DynamicIsland: React.FC = () => {
 
     // Window canvas is 600px wide, centered horizontally
     const left = Math.round((600 - w) / 2);
-    try {
-      invoke('update_capsule_bounds', { x: left, y: top, width: w, height: h });
-    } catch {
-      // Fallback
+    if (isTauriEnv) {
+      try {
+        invoke('update_capsule_bounds', { x: left, y: top, width: w, height: h });
+      } catch {
+        // Fallback
+      }
     }
   }, [state, isStealthPeeking, previousNonVolumeState, settings.verticalOffset]);
 
@@ -379,6 +494,7 @@ export const DynamicIsland: React.FC = () => {
 
   // Poll Windows GSMTC (Global System Media Transport Controls)
   useEffect(() => {
+    if (!isTauriEnv) return;
     let isMounted = true;
 
     const pollMedia = async () => {
@@ -476,6 +592,7 @@ export const DynamicIsland: React.FC = () => {
 
   // Poll Windows Real-Time Clipboard History
   useEffect(() => {
+    if (!isTauriEnv) return;
     let isMounted = true;
 
     const pollClipboard = async () => {
@@ -499,6 +616,7 @@ export const DynamicIsland: React.FC = () => {
 
   // Poll Windows OS Master Volume Events (Physical keys / System slider)
   useEffect(() => {
+    if (!isTauriEnv) return;
     let isMounted = true;
     const checkVolume = async () => {
       try {
@@ -547,6 +665,7 @@ export const DynamicIsland: React.FC = () => {
 
   // Poll Foreground Window Maximized status (Universal Win32 Detection)
   useEffect(() => {
+    if (!isTauriEnv) return;
     let isMounted = true;
     const checkMaximized = async () => {
       try {
@@ -639,6 +758,7 @@ export const DynamicIsland: React.FC = () => {
 
   // Tauri native Window Drag & Drop Event Listener
   useEffect(() => {
+    if (!isTauriEnv) return;
     let unlisten: (() => void) | undefined;
 
     try {
@@ -697,18 +817,33 @@ export const DynamicIsland: React.FC = () => {
     return () => clearInterval(interval);
   }, [isPlaying, isGsmtcActive, currentTrack.duration, playlist.length]);
 
-  // Escape key listener to dismiss pinned drawers
+  // Escape key listener to dismiss pinned drawers or radial switcher, plus Arrow navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (state === 'pinned-shelf' || state === 'pinned-clip' || state === 'hover-media') {
+        if (isRadialDialOpen) {
+          setIsRadialDialOpen(false);
+          return;
+        }
+        if (state === 'pinned-shelf' || state === 'pinned-clip' || state === 'pinned-palette' || state === 'hover-media') {
           setState(isPlaying ? 'ambient-active' : 'pure-idle');
+        }
+      }
+      if (!isRadialDialOpen) {
+        if (e.key === 'ArrowRight') {
+          if (state === 'hover-media') setState('pinned-shelf');
+          else if (state === 'pinned-shelf') setState('pinned-clip');
+          else if (state === 'pinned-clip') setState('pinned-palette');
+        } else if (e.key === 'ArrowLeft') {
+          if (state === 'pinned-palette') setState('pinned-clip');
+          else if (state === 'pinned-clip') setState('pinned-shelf');
+          else if (state === 'pinned-shelf') setState('hover-media');
         }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [state, isPlaying]);
+  }, [state, isPlaying, isRadialDialOpen]);
 
   const formatSeconds = (s: number) => {
     const m = Math.floor(s / 60);
@@ -749,6 +884,8 @@ export const DynamicIsland: React.FC = () => {
   const handleMouseLeave = () => {
     isCapsuleHoveredRef.current = false;
     if (hoverDebounceRef.current) clearTimeout(hoverDebounceRef.current);
+    setIsRadialDialOpen(false);
+    setHoveredRadialSector(null);
     if (state === 'hover-media') {
       if (isForegroundMax) {
         setState('stealth-micro');
@@ -818,8 +955,8 @@ export const DynamicIsland: React.FC = () => {
       }
     }
 
-    // Jika sedang di drawer (shelf/clipboard), biarkan drawer tetap terbuka
-    if (state === 'pinned-shelf' || state === 'pinned-clip') {
+    // Jika sedang di drawer (shelf/clipboard/palette), biarkan drawer tetap terbuka
+    if (state === 'pinned-shelf' || state === 'pinned-clip' || state === 'pinned-palette') {
       return;
     }
 
@@ -918,6 +1055,105 @@ export const DynamicIsland: React.FC = () => {
     setClipboard([]);
   };
 
+  // --- Satellite Color Palette Actions ---
+  const handleAddColorToPalette = (hexColor: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const hex = hexColor.trim().toUpperCase();
+    if (!hex.startsWith('#')) return;
+    setPalette((prev) => {
+      const filtered = prev.filter((c) => c.hex.toLowerCase() !== hex.toLowerCase());
+      const newColor: PaletteColor = {
+        hex,
+        name: 'Warna Kustom',
+        tailwind: 'custom',
+      };
+      return [newColor, ...filtered].slice(0, 8); // Max 8 colors
+    });
+    setActivePaletteIdx(0);
+  };
+
+  const handleRemovePaletteColor = (idx: number, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    e?.preventDefault();
+    setPalette((prev) => prev.filter((_, i) => i !== idx));
+    setActivePaletteIdx((prev) => Math.max(0, Math.min(prev, palette.length - 2)));
+  };
+
+  const handleCopyPaletteColor = (color: PaletteColor, idx: number, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setActivePaletteIdx(idx);
+    setCopiedPaletteHex(color.hex);
+    try {
+      navigator.clipboard?.writeText(color.hex);
+    } catch {
+      // Fallback
+    }
+    // Record into clipboard history
+    setClipboard((prev) => [
+      {
+        id: `col-${Date.now()}`,
+        item_type: 'COLOR',
+        content: color.hex,
+        time: 'Baru saja',
+      },
+      ...prev.filter((p) => p.content !== color.hex),
+    ]);
+    setTimeout(() => {
+      setCopiedPaletteHex(null);
+    }, 1200);
+  };
+
+  const handleOpenEyeDropper = async (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (typeof window !== 'undefined' && 'EyeDropper' in window) {
+      try {
+        const eyeDropper = new (window as any).EyeDropper();
+        const result = await eyeDropper.open();
+        if (result && result.sRGBHex) {
+          const hex = result.sRGBHex.toUpperCase();
+          handleAddColorToPalette(hex);
+          setCopiedPaletteHex(hex);
+          navigator.clipboard?.writeText(hex);
+          setTimeout(() => setCopiedPaletteHex(null), 1200);
+        }
+      } catch {
+        // User cancelled
+      }
+    } else {
+      // Web fallback if EyeDropper not available
+      const input = window.prompt('Masukkan kode warna HEX untuk ditambahkan ke palet:', '#38BDF8');
+      if (input && /^#[0-9A-Fa-f]{3,8}$/.test(input.trim())) {
+        handleAddColorToPalette(input.trim().toUpperCase());
+      }
+    }
+  };
+
+  // Keyboard shortcut listener for Color Picker
+  useEffect(() => {
+    if (!settings.colorPickerShortcutEnabled) return;
+
+    const handleShortcut = (e: KeyboardEvent) => {
+      const isCtrl = e.ctrlKey || e.metaKey;
+      const isShift = e.shiftKey;
+      const isAlt = e.altKey;
+      const pressedKey = e.key.toUpperCase();
+
+      const sc = (settings.colorPickerShortcut || 'Ctrl+Shift+C').toUpperCase();
+      const reqCtrl = sc.includes('CTRL');
+      const reqShift = sc.includes('SHIFT');
+      const reqAlt = sc.includes('ALT');
+      const reqKey = sc.split('+').pop()?.trim();
+
+      if (isCtrl === reqCtrl && isShift === reqShift && isAlt === reqAlt && pressedKey === reqKey) {
+        e.preventDefault();
+        handleOpenEyeDropper();
+      }
+    };
+
+    window.addEventListener('keydown', handleShortcut);
+    return () => window.removeEventListener('keydown', handleShortcut);
+  }, [settings.colorPickerShortcutEnabled, settings.colorPickerShortcut]);
+
   // --- Capsule Geometry per State ---
   const getCapsuleStyles = (): React.CSSProperties => {
     switch (state) {
@@ -955,21 +1191,22 @@ export const DynamicIsland: React.FC = () => {
         return {
           top: '0px',
           width: '456px',
-          height: '64px',
+          height: '184px',
           borderRadius: '0px 0px 24px 24px',
         };
       case 'pinned-shelf':
         return {
           top: '0px',
-          width: '470px',
-          height: '180px',
+          width: '456px',
+          height: '184px',
           borderRadius: '0px 0px 24px 24px',
         };
       case 'pinned-clip':
+      case 'pinned-palette':
         return {
           top: '0px',
-          width: '430px',
-          height: '180px',
+          width: '456px',
+          height: '184px',
           borderRadius: '0px 0px 24px 24px',
         };
       case 'volume-hud':
@@ -1031,6 +1268,9 @@ export const DynamicIsland: React.FC = () => {
           : { background: 'rgba(126, 34, 206, 0.12)', color: '#7e22ce' };
     }
   };
+
+  const isCarouselOpen = state === 'hover-media' || state === 'pinned-shelf' || state === 'pinned-clip' || state === 'pinned-palette';
+  const slideIndex = state === 'hover-media' ? 0 : state === 'pinned-shelf' ? 1 : state === 'pinned-clip' ? 2 : 3;
 
   return (
     <div
@@ -1272,453 +1512,810 @@ export const DynamicIsland: React.FC = () => {
           </div>
         )}
 
-        {/* State 4: Hover-to-Reveal Media Controls + Satellite Buttons */}
-        {state === 'hover-media' && (
-          <div className="w-full h-full flex items-center gap-2.5 px-3">
-            {/* Cover Art */}
-            <img
-              src={currentTrack.cover}
-              className="w-9 h-9 rounded-xl object-cover border border-white/10 shrink-0"
-              alt="Art"
-            />
-
-            {/* Title & Progress line */}
-            <div className="flex-1 min-w-0 flex flex-col justify-center gap-1">
-              <div className="w-full min-w-0">
-                <p className="text-xs font-semibold truncate tracking-tight m-0" style={{ color: textPrimary }}>
-                  {currentTrack.title}
-                </p>
-              </div>
-              <div className="flex items-center gap-1.5 w-full">
-                <span className="text-[9px] font-mono tnum shrink-0" style={{ color: textMuted }}>
-                  {formatSeconds(progress)}
-                </span>
-                <div className="flex-1 h-1 bg-white/15 rounded-full overflow-hidden">
-                  <div
-                    className="h-full rounded-full transition-all duration-150"
-                    style={{
-                      width: `${Math.min(100, (progress / currentTrack.duration) * 100)}%`,
-                      backgroundColor: getInkAccent(currentTrack.accent),
-                    }}
-                  />
-                </div>
-                <span className="text-[9px] font-mono tnum shrink-0" style={{ color: textMuted }}>
-                  {formatSeconds(currentTrack.duration)}
-                </span>
-              </div>
-            </div>
-
-            {/* Playback Controls */}
-            <div className="flex items-center gap-1 shrink-0">
-              <button
-                onClick={handleSkipPrev}
-                className="w-6 h-6 rounded-full flex items-center justify-center text-white/70 hover:text-white transition active:scale-90"
-                title="Sebelumnya"
-              >
-                <SkipBack className="w-3.5 h-3.5 fill-current" />
-              </button>
-              <button
-                onClick={handleTogglePlay}
-                className="play-btn w-7 h-7 rounded-full flex items-center justify-center font-bold shadow-md transition active:scale-90"
-                style={{ backgroundColor: currentTrack.accent, color: '#121316' }}
-                title="Play/Pause"
-              >
-                {isPlaying ? (
-                  <Pause className="w-3.5 h-3.5 fill-current" />
-                ) : (
-                  <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
-                )}
-              </button>
-              <button
-                onClick={handleSkipNext}
-                className="w-6 h-6 rounded-full flex items-center justify-center text-white/70 hover:text-white transition active:scale-90"
-                title="Berikutnya"
-              >
-                <SkipForward className="w-3.5 h-3.5 fill-current" />
-              </button>
-            </div>
-
-            {/* Hairline Divider */}
-            <div className="h-6 w-[1px] bg-white/[0.1] mx-0.5" />
-
-            {/* Three Satellite Action Buttons: Drop Shelf, Clipboard, Settings */}
-            <div className="flex items-center gap-1.5 shrink-0">
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setState('pinned-shelf');
-                }}
-                className="h-8 px-2 rounded-xl transition flex items-center gap-1.5 active:scale-95"
-                style={{
-                  background: cardBg,
-                  border: `1px solid ${cardBorder}`,
-                }}
-                title="Buka File Drop Shelf"
-              >
-                <FolderDown className="w-3.5 h-3.5" style={{ color: isDark ? '#2dd4bf' : '#0d9488' }} />
-                <span className="text-[10px] font-mono font-medium" style={{ color: textMuted }}>
-                  {shelfFiles.length}
-                </span>
-              </button>
-
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setState('pinned-clip');
-                }}
-                className="h-8 w-8 rounded-xl transition flex items-center justify-center active:scale-95"
-                style={{
-                  background: cardBg,
-                  border: `1px solid ${cardBorder}`,
-                }}
-                title="Buka Clipboard Stash"
-              >
-                <Clipboard className="w-3.5 h-3.5" style={{ color: isDark ? '#fbbf24' : '#d97706' }} />
-              </button>
-
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  invoke('open_settings_window').catch(console.error);
-                }}
-                className="h-8 w-8 rounded-xl transition flex items-center justify-center active:scale-95"
-                style={{
-                  background: cardBg,
-                  border: `1px solid ${cardBorder}`,
-                }}
-                title="Buka Pengaturan (Settings)"
-              >
-                <Settings className="w-3.5 h-3.5" style={{ color: isDark ? '#818cf8' : '#4f46e5' }} />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* State 5: Pinned Top-Docked Shelf Drawer */}
-        {state === 'pinned-shelf' && (
-          <div className="flex flex-col w-full h-full py-2 px-3 justify-between">
-            {/* Header */}
-            <div
-              className="flex items-center justify-between pb-1.5"
-              style={{ borderBottom: `1px solid ${cardBorderSubtle}` }}
-            >
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setState('hover-media');
-                  }}
-                  className="w-6 h-6 rounded-lg flex items-center justify-center transition active:scale-90"
-                  style={{
-                    background: cardBg,
-                    border: `1px solid ${cardBorder}`,
-                    color: textPrimary,
-                  }}
-                  title="Kembali ke Kontrol Media"
-                >
-                  <ChevronLeft className="w-3.5 h-3.5" />
-                </button>
-                <FolderDown className="w-4 h-4" style={{ color: isDark ? '#2dd4bf' : '#0d9488' }} />
-                <span className="text-xs font-semibold tracking-tight" style={{ color: textPrimary }}>
-                  File Drop Shelf
-                </span>
-                <span
-                  className="text-[10px] font-mono px-2 py-0.5 rounded-full font-medium"
-                  style={{
-                    background: isDark ? 'rgba(45, 212, 191, 0.15)' : 'rgba(13, 148, 136, 0.15)',
-                    color: isDark ? '#5eead4' : '#0f766e',
-                  }}
-                >
-                  {shelfFiles.length} Berkas
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                {shelfFiles.length > 0 && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShelfFiles([]);
-                    }}
-                    className="text-[10px] hover:text-rose-500 transition flex items-center gap-1"
-                    style={{ color: textSubtle }}
-                    title="Kosongkan Shelf"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                    <span>Kosongkan</span>
-                  </button>
-                )}
-                <span className="text-[10px] font-mono" style={{ color: textSubtle }}>ESC</span>
-              </div>
-            </div>
-
-            {/* Drag Over Hint Zone */}
-            {isDragOver ? (
+        {/* UNIFIED CAROUSEL SLIDER (Media | Shelf | Clipboard) */}
+        {isCarouselOpen && (
+          <div className="w-full h-full flex flex-col justify-between overflow-hidden relative select-none">
+            {/* Horizontal Sliding Viewport */}
+            <div className="w-full flex-1 overflow-hidden relative min-h-0">
               <div
-                className="flex-1 my-1 border-2 border-dashed rounded-xl flex items-center justify-center"
+                className="flex h-full transition-transform duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]"
                 style={{
-                  borderColor: isDark ? 'rgba(45, 212, 191, 0.6)' : 'rgba(13, 148, 136, 0.6)',
-                  background: isDark ? 'rgba(45, 212, 191, 0.1)' : 'rgba(13, 148, 136, 0.1)',
+                  width: '400%',
+                  transform: `translateX(-${slideIndex * 25}%)`,
                 }}
               >
-                <span
-                  className="text-xs font-medium animate-pulse"
-                  style={{ color: isDark ? '#5eead4' : '#0d9488' }}
-                >
-                  Lepaskan berkas di sini untuk simpan ke Shelf
-                </span>
-              </div>
-            ) : shelfFiles.length === 0 ? (
-              <div
-                className="flex-1 my-1 border border-dashed rounded-xl flex flex-col items-center justify-center gap-1 select-none"
-                style={{ borderColor: cardBorder }}
-              >
-                <FolderDown className="w-5 h-5" style={{ color: textSubtle }} />
-                <span className="text-xs" style={{ color: textMuted }}>Shelf masih kosong</span>
-                <span className="text-[10px]" style={{ color: isDark ? '#2dd4bf' : '#0d9488' }}>
-                  Tarik berkas dari mana saja & letakkan di sini
-                </span>
-              </div>
-            ) : (
-              /* File Items Grid */
-              <div className="grid grid-cols-2 gap-2 my-1 overflow-y-auto hig-scrollbar max-h-24 pr-1">
-                {shelfFiles.map((file) => (
-                  <div
-                    key={file.id}
-                    draggable
-                    onDragStart={(e) => handleStartDragFile(e, file)}
-                    className="group relative flex items-center gap-1.5 p-1.5 rounded-xl transition cursor-grab active:cursor-grabbing hover:border-teal-400/40 hover:bg-white/[0.05] select-none shadow-sm"
-                    style={{ background: cardBg, border: `1px solid ${cardBorder}` }}
-                    title="Tarik berkas keluar untuk gunakan di File Explorer, Desktop, atau aplikasi lain"
-                  >
-                    {/* Drag Grip indicator */}
-                    <div className="opacity-30 group-hover:opacity-80 transition text-zinc-400 shrink-0">
-                      <GripVertical className="w-3 h-3" />
+                {/* SLIDE 0: Hover-to-Reveal Media Controls */}
+                <div className="w-1/4 h-full px-3.5 pt-2.5 pb-1 flex flex-col justify-between shrink-0 box-border">
+                  {/* ROW 1: Metadata (Left) + Radial Audio Switcher (Right) */}
+                  <div className="flex items-center justify-between w-full gap-2">
+                    {/* Left: Artwork + Title + Artist */}
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      <img
+                        src={currentTrack.cover}
+                        className="w-11 h-11 rounded-xl object-cover border border-white/10 shrink-0 shadow-sm"
+                        alt="Art"
+                      />
+                      <div className="min-w-0 flex-1 flex flex-col justify-center">
+                        <p className="text-xs font-semibold truncate tracking-tight m-0" style={{ color: textPrimary }}>
+                          {currentTrack.title}
+                        </p>
+                        <p className="text-[11px] truncate m-0 font-medium opacity-60 mt-0.5" style={{ color: textMuted }}>
+                          {currentTrack.artist}
+                        </p>
+                      </div>
                     </div>
 
-                    {/* Extension Badge */}
-                    <div
-                      className="w-7 h-7 rounded-lg flex items-center justify-center font-mono font-bold text-[9px] shrink-0 pointer-events-none"
-                      style={{
-                        background: `${file.color}${isDark ? '20' : '33'}`,
-                        color: isDark ? file.color : getInkAccent(file.color),
-                      }}
-                    >
-                      {file.ext}
-                    </div>
-
-                    {/* File Info */}
-                    <div className="min-w-0 flex-1 pointer-events-none">
-                      <p className="text-[11px] font-medium truncate" style={{ color: textPrimary }}>
-                        {file.name}
-                      </p>
-                      <p className="text-[9px] font-mono" style={{ color: textMuted }}>
-                        {file.size}
-                      </p>
-                    </div>
-
-                    {/* Action buttons on card hover */}
-                    <div className="flex items-center gap-0.5 shrink-0" onMouseDown={(e) => e.stopPropagation()}>
-                      {file.path && (
-                        <button
-                          onClick={(e) => handleRevealInExplorer(file.path, e)}
-                          className="p-1 hover:text-teal-500 transition"
-                          style={{ color: textSubtle }}
-                          title="Buka di File Explorer"
-                        >
-                          <ExternalLink className="w-3 h-3" style={{ color: isDark ? '#2dd4bf' : '#0d9488' }} />
-                        </button>
-                      )}
+                    {/* Right: Quick Audio Switcher Button (Compact Circular Icon) */}
+                    <div className="relative shrink-0 flex items-center">
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          setShelfFiles((prev) => prev.filter((f) => f.id !== file.id));
+                          setIsRadialDialOpen(true);
                         }}
-                        className="p-1 hover:text-rose-500 transition"
-                        style={{ color: textSubtle }}
-                        title="Hapus dari Shelf"
+                        className={`w-7 h-7 rounded-full flex items-center justify-center transition-all active:scale-90 border cursor-pointer ${
+                          isRadialDialOpen
+                            ? 'bg-teal-500/25 border-teal-500/40 text-teal-300 shadow-[0_0_12px_rgba(20,184,166,0.35)]'
+                            : 'bg-white/10 hover:bg-white/20 hover:scale-105 border-white/15 text-white/90'
+                        }`}
+                        title={`Audio Output: ${activeDevice.name} (Klik untuk membuka Diagram Audio)`}
                       >
-                        <X className="w-3 h-3" />
+                        {renderDeviceIcon(activeDevice.type, 'w-3.5 h-3.5 text-teal-400')}
                       </button>
+
+                      {/* Micro Toast Feedback */}
+                      {audioFeedbackNotice && (
+                        <div className="absolute -top-7 right-0 text-[10px] font-mono px-2 py-0.5 rounded-md bg-teal-500/90 text-black font-semibold shadow-md whitespace-nowrap animate-in fade-in zoom-in-95 duration-150 pointer-events-none">
+                          {audioFeedbackNotice}
+                        </div>
+                      )}
                     </div>
                   </div>
-                ))}
+
+                  {/* ROW 2: Playback Controls (Anchor Visual Utama di Tengah) */}
+                  <div className="flex items-center justify-center gap-6 w-full my-auto">
+                    <button
+                      onClick={handleSkipPrev}
+                      className="w-8 h-8 rounded-full flex items-center justify-center text-white/70 hover:text-white hover:bg-white/10 transition-all active:scale-90 cursor-pointer"
+                      title="Lagu Sebelumnya"
+                    >
+                      <SkipBack className="w-4 h-4 fill-current" />
+                    </button>
+
+                    <button
+                      onClick={handleTogglePlay}
+                      className="play-btn w-11 h-11 rounded-full flex items-center justify-center font-bold shadow-lg shadow-white/15 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                      style={{ backgroundColor: currentTrack.accent || '#ffffff', color: '#121316' }}
+                      title={isPlaying ? 'Jeda (Pause)' : 'Putar (Play)'}
+                    >
+                      {isPlaying ? (
+                        <Pause className="w-5 h-5 fill-current" />
+                      ) : (
+                        <Play className="w-5 h-5 fill-current ml-0.5" />
+                      )}
+                    </button>
+
+                    <button
+                      onClick={handleSkipNext}
+                      className="w-8 h-8 rounded-full flex items-center justify-center text-white/70 hover:text-white hover:bg-white/10 transition-all active:scale-90 cursor-pointer"
+                      title="Lagu Berikutnya"
+                    >
+                      <SkipForward className="w-4 h-4 fill-current" />
+                    </button>
+                  </div>
+
+                  {/* ROW 3: Interactive Scrubbing Bar (Full Width with Time Indicator) */}
+                  <div className="w-full flex items-center gap-2 pb-1">
+                    <span className="text-[10px] font-mono tnum shrink-0 w-8 text-right" style={{ color: textMuted }}>
+                      {formatSeconds(progress)}
+                    </span>
+                    <div
+                      className="flex-1 h-3 flex items-center cursor-pointer group"
+                      onClick={(e) => {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+                        setProgress(Math.round(pos * currentTrack.duration));
+                      }}
+                    >
+                      <div className="w-full h-1 bg-white/15 rounded-full overflow-hidden group-hover:h-1.5 transition-all">
+                        <div
+                          className="h-full rounded-full transition-all duration-100 bg-gradient-to-r from-teal-400 to-cyan-400"
+                          style={{
+                            width: `${Math.min(100, (progress / currentTrack.duration) * 100)}%`,
+                          }}
+                        />
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-mono tnum shrink-0 w-8" style={{ color: textMuted }}>
+                      {formatSeconds(currentTrack.duration)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* SLIDE 1: Pinned Top-Docked Shelf Drawer */}
+                <div className="w-1/4 h-full px-3 pt-2 pb-0.5 flex flex-col justify-between shrink-0 box-border">
+                  {/* Header */}
+                  <div
+                    className="flex items-center justify-between pb-1.5"
+                    style={{ borderBottom: `1px solid ${cardBorderSubtle}` }}
+                  >
+                    <div className="flex items-center gap-2">
+                      <FolderDown className="w-4 h-4" style={{ color: isDark ? '#2dd4bf' : '#0d9488' }} />
+                      <span className="text-xs font-semibold tracking-tight" style={{ color: textPrimary }}>
+                        Drop Shelf
+                      </span>
+                      <span
+                        className="text-[10px] font-mono px-2 py-0.5 rounded-full font-medium"
+                        style={{
+                          background: isDark ? 'rgba(45, 212, 191, 0.15)' : 'rgba(13, 148, 136, 0.15)',
+                          color: isDark ? '#5eead4' : '#0f766e',
+                        }}
+                      >
+                        {shelfFiles.length} Berkas
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {shelfFiles.length > 0 && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setShelfFiles([]);
+                          }}
+                          className="text-[10px] hover:text-rose-500 transition flex items-center gap-1"
+                          style={{ color: textSubtle }}
+                          title="Kosongkan Shelf"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>Kosongkan</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Drag Over Hint Zone */}
+                  {isDragOver ? (
+                    <div
+                      className="flex-1 my-1 border-2 border-dashed rounded-xl flex items-center justify-center"
+                      style={{
+                        borderColor: isDark ? 'rgba(45, 212, 191, 0.6)' : 'rgba(13, 148, 136, 0.6)',
+                        background: isDark ? 'rgba(45, 212, 191, 0.1)' : 'rgba(13, 148, 136, 0.1)',
+                      }}
+                    >
+                      <span
+                        className="text-xs font-medium animate-pulse"
+                        style={{ color: isDark ? '#5eead4' : '#0d9488' }}
+                      >
+                        Lepaskan berkas di sini untuk simpan ke Shelf
+                      </span>
+                    </div>
+                  ) : shelfFiles.length === 0 ? (
+                    <div
+                      className="flex-1 my-1 border border-dashed rounded-xl flex flex-col items-center justify-center gap-1 select-none"
+                      style={{ borderColor: cardBorder }}
+                    >
+                      <FolderDown className="w-5 h-5" style={{ color: textSubtle }} />
+                      <span className="text-xs" style={{ color: textMuted }}>Shelf masih kosong</span>
+                      <span className="text-[10px]" style={{ color: isDark ? '#2dd4bf' : '#0d9488' }}>
+                        Tarik berkas dari mana saja & letakkan di sini
+                      </span>
+                    </div>
+                  ) : (
+                    /* File Items Grid */
+                    <div className="grid grid-cols-2 gap-2 my-1 overflow-y-auto hig-scrollbar h-[112px] pr-1">
+                      {shelfFiles.map((file) => (
+                        <div
+                          key={file.id}
+                          draggable
+                          onDragStart={(e) => handleStartDragFile(e, file)}
+                          className="group relative flex items-center gap-1.5 p-1.5 rounded-xl transition cursor-grab active:cursor-grabbing hover:border-teal-400/40 hover:bg-white/[0.05] select-none shadow-sm"
+                          style={{ background: cardBg, border: `1px solid ${cardBorder}` }}
+                          title="Tarik berkas keluar untuk gunakan di File Explorer, Desktop, atau aplikasi lain"
+                        >
+                          {/* Drag Grip indicator */}
+                          <div className="opacity-30 group-hover:opacity-80 transition text-zinc-400 shrink-0">
+                            <GripVertical className="w-3 h-3" />
+                          </div>
+
+                          {/* Extension Badge */}
+                          <div
+                            className="w-7 h-7 rounded-lg flex items-center justify-center font-mono font-bold text-[9px] shrink-0 pointer-events-none"
+                            style={{
+                              background: `${file.color}${isDark ? '20' : '33'}`,
+                              color: isDark ? file.color : getInkAccent(file.color),
+                            }}
+                          >
+                            {file.ext}
+                          </div>
+
+                          {/* File Info */}
+                          <div className="min-w-0 flex-1 pointer-events-none">
+                            <p className="text-[11px] font-medium truncate" style={{ color: textPrimary }}>
+                              {file.name}
+                            </p>
+                            <p className="text-[9px] font-mono" style={{ color: textMuted }}>
+                              {file.size}
+                            </p>
+                          </div>
+
+                          {/* Action buttons on card hover */}
+                          <div className="flex items-center gap-0.5 shrink-0" onMouseDown={(e) => e.stopPropagation()}>
+                            {file.path && (
+                              <button
+                                onClick={(e) => handleRevealInExplorer(file.path, e)}
+                                className="p-1 hover:text-teal-500 transition"
+                                style={{ color: textSubtle }}
+                                title="Buka di File Explorer"
+                              >
+                                <ExternalLink className="w-3 h-3" style={{ color: isDark ? '#2dd4bf' : '#0d9488' }} />
+                              </button>
+                            )}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setShelfFiles((prev) => prev.filter((f) => f.id !== file.id));
+                              }}
+                              className="p-1 hover:text-rose-500 transition"
+                              style={{ color: textSubtle }}
+                              title="Hapus dari Shelf"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* SLIDE 2: Pinned Top-Docked Clipboard Drawer */}
+                <div className="w-1/4 h-full px-3 pt-2 pb-0.5 flex flex-col justify-between shrink-0 box-border">
+                  {/* Header */}
+                  <div
+                    className="flex items-center justify-between pb-1.5"
+                    style={{ borderBottom: `1px solid ${cardBorderSubtle}` }}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Clipboard className="w-4 h-4" style={{ color: isDark ? '#fbbf24' : '#d97706' }} />
+                      <span className="text-xs font-semibold tracking-tight" style={{ color: textPrimary }}>
+                        Papan Klip Cepat
+                      </span>
+                      <span
+                        className="text-[10px] font-mono px-2 py-0.5 rounded-full font-medium"
+                        style={{
+                          background: isDark ? 'rgba(245, 158, 11, 0.15)' : 'rgba(217, 119, 6, 0.15)',
+                          color: isDark ? '#fcd34d' : '#b45309',
+                        }}
+                      >
+                        {clipboard.length} Riwayat
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {clipboard.length > 0 && (
+                        <button
+                          onClick={handleClearClipboard}
+                          className="text-[10px] hover:text-rose-500 transition flex items-center gap-1 cursor-pointer"
+                          style={{ color: textSubtle }}
+                          title="Kosongkan Riwayat Clipboard"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>Kosongkan</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Clipboard Items List */}
+                  {clipboard.length === 0 ? (
+                    <div
+                      className="flex-1 my-1 border border-dashed rounded-xl flex flex-col items-center justify-center gap-1"
+                      style={{ borderColor: cardBorder }}
+                    >
+                      <Clipboard className="w-5 h-5" style={{ color: textSubtle }} />
+                      <span className="text-xs" style={{ color: textMuted }}>Riwayat clipboard kosong</span>
+                      <span className="text-[10px]" style={{ color: isDark ? '#fbbf24' : '#d97706' }}>
+                        Salin teks di mana saja (Ctrl+C)
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5 my-1 overflow-y-auto hig-scrollbar h-[112px] pr-1">
+                      {clipboard.map((entry) => {
+                        const isCopied = copiedId === entry.id;
+                        const isColor = entry.item_type === 'COLOR';
+
+                        return (
+                          <div
+                            key={entry.id}
+                            onClick={(e) => handleCopyClipboardItem(entry, e)}
+                            className="group flex items-center justify-between p-1.5 rounded-xl transition cursor-pointer text-xs"
+                            style={{ background: cardBg, border: `1px solid ${cardBorder}` }}
+                            title="Klik untuk salin instan"
+                          >
+                            <div className="flex items-center gap-2 truncate flex-1 min-w-0">
+                              {/* Type badge */}
+                              <span
+                                className="text-[9px] font-mono px-1.5 py-0.5 rounded font-bold shrink-0"
+                                style={getClipBadgeStyle(entry.item_type)}
+                              >
+                                {entry.item_type}
+                              </span>
+
+                              {/* Color Preview Swatch */}
+                              {isColor && (
+                                <div
+                                  className="w-3.5 h-3.5 rounded shrink-0"
+                                  style={{
+                                    backgroundColor: entry.content.trim(),
+                                    border: `1px solid ${cardBorder}`,
+                                  }}
+                                />
+                              )}
+
+                              {/* Snippet text */}
+                              <span className="truncate font-mono text-[11px]" style={{ color: textPrimary }}>
+                                {entry.content}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                              {isCopied ? (
+                                <span
+                                  className="text-[9px] font-mono px-1.5 py-0.5 rounded font-semibold flex items-center gap-0.5"
+                                  style={{
+                                    background: isDark ? 'rgba(52, 211, 153, 0.2)' : 'rgba(5, 150, 105, 0.15)',
+                                    color: isDark ? '#6ee7b7' : '#047857',
+                                  }}
+                                >
+                                  <Check className="w-2.5 h-2.5" />
+                                  <span>Tersalin!</span>
+                                </span>
+                              ) : (
+                                <span className="text-[10px]" style={{ color: textMuted }}>
+                                  {entry.time}
+                                </span>
+                              )}
+
+                              <button
+                                onClick={(e) => handleRemoveClipboardItem(entry.id, e)}
+                                className="p-1 opacity-0 group-hover:opacity-100 hover:text-rose-500 transition cursor-pointer"
+                                style={{ color: textSubtle }}
+                                title="Hapus baris ini"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* SLIDE 3: Pinned Color Palette Drawer */}
+                <div className="w-1/4 h-full px-3 pt-2 pb-0.5 flex flex-col justify-between shrink-0 box-border">
+                  {/* Header */}
+                  <div
+                    className="flex items-center justify-between pb-1.5"
+                    style={{ borderBottom: `1px solid ${cardBorderSubtle}` }}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Palette className="w-4 h-4 text-purple-400" />
+                      <span className="text-xs font-semibold tracking-tight" style={{ color: textPrimary }}>
+                        Palet Warna
+                      </span>
+                      <span
+                        className="text-[10px] font-mono px-2 py-0.5 rounded-full font-medium"
+                        style={{
+                          background: isDark ? 'rgba(192, 132, 252, 0.15)' : 'rgba(147, 51, 234, 0.15)',
+                          color: isDark ? '#d8b4fe' : '#7e22ce',
+                        }}
+                      >
+                        {palette.length}/8 Warna
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={handleOpenEyeDropper}
+                        className="text-[10px] hover:text-purple-400 transition flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/10 cursor-pointer"
+                        style={{ color: textSubtle }}
+                        title="Ambil warna dari layar dengan Eyedropper"
+                      >
+                        <Pipette className="w-2.5 h-2.5" />
+                        <span>+ Ambil Warna</span>
+                      </button>
+                      {palette.length > 0 && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPalette([]);
+                          }}
+                          className="text-[10px] hover:text-rose-500 transition flex items-center gap-1 cursor-pointer"
+                          style={{ color: textSubtle }}
+                          title="Kosongkan Semua Warna di Palet"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>Kosongkan</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Body Content */}
+                  {palette.length === 0 ? (
+                    <div
+                      className="flex-1 my-1 border border-dashed rounded-xl flex flex-col items-center justify-center gap-1.5 cursor-pointer hover:bg-white/[0.02] transition"
+                      style={{ borderColor: cardBorder }}
+                      onClick={handleOpenEyeDropper}
+                    >
+                      <Palette className="w-5 h-5 text-purple-400/60" />
+                      <div className="text-center">
+                        <span className="text-xs block" style={{ color: textMuted }}>Belum ada warna tersimpan</span>
+                        <span className="text-[10px] text-purple-400 font-medium">Klik untuk ambil warna via Eyedropper</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-4 gap-1.5 my-1 h-[112px] overflow-y-auto hig-scrollbar pr-0.5">
+                      {palette.map((color, idx) => {
+                        const isCopied = copiedPaletteHex === color.hex;
+                        return (
+                          <div
+                            key={`${color.hex}-${idx}`}
+                            onClick={(e) => handleCopyPaletteColor(color, idx, e)}
+                            className="group relative flex flex-col items-center justify-center p-1.5 rounded-xl transition cursor-pointer hover:scale-[1.02] active:scale-95 shadow-sm"
+                            style={{ background: cardBg, border: `1px solid ${cardBorder}` }}
+                            title={`${color.hex} - Klik untuk salin`}
+                          >
+                            <div
+                              className="w-6 h-6 rounded-full shadow-inner border border-white/20 flex items-center justify-center mb-1 shrink-0"
+                              style={{ backgroundColor: color.hex }}
+                            >
+                              {isCopied && <Check className="w-3.5 h-3.5 text-black stroke-[3]" />}
+                            </div>
+                            <span className="text-[10px] font-mono font-semibold truncate max-w-full" style={{ color: textPrimary }}>
+                              {isCopied ? 'Tersalin!' : color.hex}
+                            </span>
+                            <button
+                              onClick={(e) => handleRemovePaletteColor(idx, e)}
+                              className="absolute top-1 right-1 p-0.5 opacity-0 group-hover:opacity-100 hover:text-rose-500 rounded-full hover:bg-white/10 transition cursor-pointer"
+                              style={{ color: textSubtle }}
+                              title="Hapus warna ini"
+                            >
+                              <X className="w-2.5 h-2.5" />
+                            </button>
+                          </div>
+                        );
+                      })}
+
+                      {Array.from({ length: 8 - palette.length }).map((_, slotIdx) => (
+                        <button
+                          key={`empty-slot-${slotIdx}`}
+                          onClick={handleOpenEyeDropper}
+                          className="flex flex-col items-center justify-center p-1.5 rounded-xl border border-dashed border-white/10 hover:border-purple-400/40 hover:bg-white/[0.02] transition cursor-pointer group"
+                          title="Klik untuk tambah warna baru"
+                        >
+                          <div className="w-5 h-5 rounded-full border border-dashed border-white/20 flex items-center justify-center mb-1 group-hover:border-purple-400 transition">
+                            <Plus className="w-2.5 h-2.5 text-white/40 group-hover:text-purple-400 transition" />
+                          </div>
+                          <span className="text-[9px] font-mono text-white/30 group-hover:text-purple-400/70 transition">
+                            + Slot
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* RADIAL PIE WHEEL OVERLAY (Backdrop Blur + Dead-Centered Diagram + Full Label) */}
+            {isRadialDialOpen && (
+              <div
+                className="absolute inset-0 z-50 rounded-[0px_0px_24px_24px] bg-black/92 backdrop-blur-2xl flex flex-col items-center justify-center p-2.5 animate-in fade-in zoom-in-95 duration-150 select-none shadow-2xl"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsRadialDialOpen(false);
+                }}
+              >
+                {/* Close Button (Absolute Top Right) */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsRadialDialOpen(false);
+                  }}
+                  className="absolute top-2 right-2.5 w-6 h-6 rounded-full flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition active:scale-90 cursor-pointer z-10"
+                  title="Tutup (Esc)"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+
+                {/* Dead-Centered Radial Wheel Container */}
+                <div
+                  className="flex flex-col items-center justify-center cursor-pointer"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="relative flex items-center justify-center">
+                    <svg width="76" height="76" viewBox="0 0 76 76" className="drop-shadow-xl overflow-visible">
+                      {audioDevices.map((device, idx) => {
+                        const startAngle = 210 + idx * 120;
+                        const endAngle = startAngle + 120;
+                        const midAngle = startAngle + 60;
+                        const midRad = (midAngle * Math.PI) / 180;
+                        const iconDist = 26.5;
+                        const iconX = 38 + iconDist * Math.cos(midRad) - 6;
+                        const iconY = 38 + iconDist * Math.sin(midRad) - 6;
+
+                        const isHovered = hoveredRadialSector === device.id;
+                        const isActive = activeDeviceId === device.id;
+
+                        return (
+                          <g
+                            key={device.id}
+                            className="cursor-pointer transition-all duration-150"
+                            onMouseEnter={() => setHoveredRadialSector(device.id)}
+                            onMouseLeave={() => setHoveredRadialSector(null)}
+                            onClick={() => {
+                              setActiveDeviceId(device.id);
+                              setAudioFeedbackNotice(`Output: ${device.shortName}`);
+                              setIsRadialDialOpen(false);
+                              setTimeout(() => setAudioFeedbackNotice(null), 1800);
+                            }}
+                          >
+                            <path
+                              d={getSectorPath(38, 38, 17, 36, startAngle + 2, endAngle - 2)}
+                              fill={
+                                isHovered
+                                  ? 'rgba(45, 212, 191, 0.45)'
+                                  : isActive
+                                  ? 'rgba(56, 189, 248, 0.28)'
+                                  : 'rgba(255, 255, 255, 0.08)'
+                              }
+                              stroke={
+                                isHovered
+                                  ? '#2dd4bf'
+                                  : isActive
+                                  ? '#38bdf8'
+                                  : 'rgba(255, 255, 255, 0.16)'
+                              }
+                              strokeWidth={isHovered ? 1.5 : 1}
+                              className="transition-all duration-150"
+                            />
+                            {/* Device Icon inside Sector */}
+                            <foreignObject x={iconX} y={iconY} width="12" height="12" className="pointer-events-none">
+                              <div
+                                className={`w-full h-full flex items-center justify-center transition-colors ${
+                                  isHovered ? 'text-teal-200' : isActive ? 'text-cyan-300' : 'text-white/70'
+                                }`}
+                              >
+                                {renderDeviceIcon(device.type, 'w-3 h-3')}
+                              </div>
+                            </foreignObject>
+                          </g>
+                        );
+                      })}
+
+                      {/* Center Hub Circle */}
+                      <circle
+                        cx="38"
+                        cy="38"
+                        r="15"
+                        fill="#121316"
+                        stroke="rgba(255, 255, 255, 0.18)"
+                        strokeWidth="1.5"
+                      />
+                    </svg>
+
+                    {/* Center Hub Icon Only */}
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      {(() => {
+                        const displayDevice =
+                          audioDevices.find((d) => d.id === (hoveredRadialSector || activeDeviceId)) || activeDevice;
+                        return (
+                          <div className="flex items-center justify-center">
+                            {renderDeviceIcon(displayDevice.type, 'w-3.5 h-3.5 text-cyan-400')}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* Device Name Display (Full Text, Never Cut-off or Truncated) */}
+                  <div className="flex flex-col items-center justify-center text-center mt-2 max-w-[340px]">
+                    {(() => {
+                      const displayDevice =
+                        audioDevices.find((d) => d.id === (hoveredRadialSector || activeDeviceId)) || activeDevice;
+                      return (
+                        <span className="text-xs font-semibold text-white tracking-tight animate-in fade-in duration-100 truncate w-full px-2 leading-tight">
+                          {displayDevice.name}
+                        </span>
+                      );
+                    })()}
+                  </div>
+                </div>
               </div>
             )}
 
-            {/* Footer */}
+            {/* UNIFIED PERSISTENT FOOTER & CAROUSEL DOTS (Dead-centered across all 3 slides) */}
             <div
-              className="flex items-center justify-between text-[11px] pt-1"
-              style={{ borderTop: `1px solid ${cardBorderSubtle}`, color: textMuted }}
+              className="w-full h-6 shrink-0 flex items-center justify-between px-3 relative border-t select-none"
+              style={{ borderColor: cardBorderSubtle, color: textMuted }}
             >
-              <span className="flex items-center gap-1">
-                <GripVertical className="w-3 h-3 text-teal-400/80 inline" />
-                Tarik keluar berkas untuk gunakan
-              </span>
-              <span
-                className="text-[10px] font-mono"
-                style={{ color: isDark ? 'rgba(45, 212, 191, 0.8)' : '#0d9488' }}
+              {/* Left: Previous Slide Arrow Button */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (slideIndex > 0) {
+                    if (slideIndex === 1) setState('hover-media');
+                    else if (slideIndex === 2) setState('pinned-shelf');
+                    else if (slideIndex === 3) setState('pinned-clip');
+                  }
+                }}
+                disabled={slideIndex === 0}
+                className={`w-6 h-5 rounded flex items-center justify-center transition-all ${
+                  slideIndex === 0
+                    ? 'opacity-20 text-white/30 cursor-default'
+                    : 'text-white/70 hover:text-white hover:bg-white/10 active:scale-90 cursor-pointer'
+                }`}
+                title="Slide Sebelumnya"
               >
-                Drag-in / Drag-out
-              </span>
-            </div>
-          </div>
-        )}
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
 
-        {/* State 6: Pinned Top-Docked Clipboard Drawer */}
-        {state === 'pinned-clip' && (
-          <div className="flex flex-col w-full h-full py-2 px-3 justify-between">
-            {/* Header */}
-            <div
-              className="flex items-center justify-between pb-1.5"
-              style={{ borderBottom: `1px solid ${cardBorderSubtle}` }}
-            >
-              <div className="flex items-center gap-2">
+              {/* CENTER: ROCK-SOLID CAROUSEL DOTS - COMPLETELY FIXED IN POSITION */}
+              <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1.5 z-20">
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     setState('hover-media');
                   }}
-                  className="w-6 h-6 rounded-lg flex items-center justify-center transition active:scale-90"
-                  style={{
-                    background: cardBg,
-                    border: `1px solid ${cardBorder}`,
-                    color: textPrimary,
+                  className={`h-1 rounded-full transition-all duration-300 cursor-pointer ${
+                    slideIndex === 0
+                      ? 'w-4 bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.6)]'
+                      : 'w-1.5 bg-white/30 hover:bg-white/60'
+                  }`}
+                  title="Slide 1: Kontrol Media"
+                />
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setState('pinned-shelf');
                   }}
-                  title="Kembali ke Kontrol Media"
-                >
-                  <ChevronLeft className="w-3.5 h-3.5" />
-                </button>
-                <Clipboard className="w-4 h-4" style={{ color: isDark ? '#fbbf24' : '#d97706' }} />
-                <span className="text-xs font-semibold tracking-tight" style={{ color: textPrimary }}>
-                  Papan Klip Cepat
-                </span>
-                <span
-                  className="text-[10px] font-mono px-2 py-0.5 rounded-full font-medium"
-                  style={{
-                    background: isDark ? 'rgba(245, 158, 11, 0.15)' : 'rgba(217, 119, 6, 0.15)',
-                    color: isDark ? '#fcd34d' : '#b45309',
+                  className={`h-1 rounded-full transition-all duration-300 cursor-pointer ${
+                    slideIndex === 1
+                      ? 'w-4 bg-teal-400 shadow-[0_0_8px_rgba(45,212,191,0.6)]'
+                      : 'w-1.5 bg-white/30 hover:bg-white/60'
+                  }`}
+                  title={`Slide 2: Drop Shelf (${shelfFiles.length} berkas)`}
+                />
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setState('pinned-clip');
                   }}
-                >
-                  {clipboard.length} Riwayat
-                </span>
+                  className={`h-1 rounded-full transition-all duration-300 cursor-pointer ${
+                    slideIndex === 2
+                      ? 'w-4 bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]'
+                      : 'w-1.5 bg-white/30 hover:bg-white/60'
+                  }`}
+                  title={`Slide 3: Riwayat Clipboard (${clipboard.length} klip)`}
+                />
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setState('pinned-palette');
+                  }}
+                  className={`h-1 rounded-full transition-all duration-300 cursor-pointer ${
+                    slideIndex === 3
+                      ? 'w-4 bg-purple-400 shadow-[0_0_8px_rgba(192,132,252,0.6)]'
+                      : 'w-1.5 bg-white/30 hover:bg-white/60'
+                  }`}
+                  title={`Slide 4: Palet Warna (${palette.length}/8 warna)`}
+                />
               </div>
-              <div className="flex items-center gap-2">
-                {clipboard.length > 0 && (
-                  <button
-                    onClick={handleClearClipboard}
-                    className="text-[10px] hover:text-rose-500 transition flex items-center gap-1"
-                    style={{ color: textSubtle }}
-                    title="Kosongkan Riwayat Clipboard"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                    <span>Kosongkan</span>
-                  </button>
-                )}
-                <span className="text-[10px] font-mono" style={{ color: textSubtle }}>ESC</span>
-              </div>
-            </div>
 
-            {/* Clipboard Items List */}
-            {clipboard.length === 0 ? (
-              <div
-                className="flex-1 my-1 border border-dashed rounded-xl flex flex-col items-center justify-center gap-1"
-                style={{ borderColor: cardBorder }}
+              {/* Right: Next Slide Arrow Button */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (slideIndex < 3) {
+                    if (slideIndex === 0) setState('pinned-shelf');
+                    else if (slideIndex === 1) setState('pinned-clip');
+                    else if (slideIndex === 2) setState('pinned-palette');
+                  }
+                }}
+                disabled={slideIndex === 3}
+                className={`w-6 h-5 rounded flex items-center justify-center transition-all ${
+                  slideIndex === 3
+                    ? 'opacity-20 text-white/30 cursor-default'
+                    : 'text-white/70 hover:text-white hover:bg-white/10 active:scale-90 cursor-pointer'
+                }`}
+                title="Slide Berikutnya"
               >
-                <Clipboard className="w-5 h-5" style={{ color: textSubtle }} />
-                <span className="text-xs" style={{ color: textMuted }}>Riwayat clipboard kosong</span>
-                <span className="text-[10px]" style={{ color: isDark ? '#fbbf24' : '#d97706' }}>
-                  Salin teks di mana saja (Ctrl+C)
-                </span>
-              </div>
-            ) : (
-              <div className="space-y-1.5 my-1 overflow-y-auto hig-scrollbar max-h-24 pr-1">
-                {clipboard.map((entry) => {
-                  const isCopied = copiedId === entry.id;
-                  const isColor = entry.item_type === 'COLOR';
-
-                  return (
-                    <div
-                      key={entry.id}
-                      onClick={(e) => handleCopyClipboardItem(entry, e)}
-                      className="group flex items-center justify-between p-1.5 rounded-xl transition cursor-pointer text-xs"
-                      style={{ background: cardBg, border: `1px solid ${cardBorder}` }}
-                      title="Klik untuk salin instan"
-                    >
-                      <div className="flex items-center gap-2 truncate flex-1 min-w-0">
-                        {/* Type badge */}
-                        <span
-                          className="text-[9px] font-mono px-1.5 py-0.5 rounded font-bold shrink-0"
-                          style={getClipBadgeStyle(entry.item_type)}
-                        >
-                          {entry.item_type}
-                        </span>
-
-                        {/* Color Preview Swatch */}
-                        {isColor && (
-                          <div
-                            className="w-3.5 h-3.5 rounded shrink-0"
-                            style={{
-                              backgroundColor: entry.content.trim(),
-                              border: `1px solid ${cardBorder}`,
-                            }}
-                          />
-                        )}
-
-                        {/* Snippet text */}
-                        <span className="truncate font-mono text-[11px]" style={{ color: textPrimary }}>
-                          {entry.content}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                        {isCopied ? (
-                          <span
-                            className="text-[9px] font-mono px-1.5 py-0.5 rounded font-semibold flex items-center gap-0.5"
-                            style={{
-                              background: isDark ? 'rgba(52, 211, 153, 0.2)' : 'rgba(5, 150, 105, 0.15)',
-                              color: isDark ? '#6ee7b7' : '#047857',
-                            }}
-                          >
-                            <Check className="w-2.5 h-2.5" />
-                            <span>Tersalin!</span>
-                          </span>
-                        ) : (
-                          <span className="text-[10px]" style={{ color: textMuted }}>
-                            {entry.time}
-                          </span>
-                        )}
-
-                        <button
-                          onClick={(e) => handleRemoveClipboardItem(entry.id, e)}
-                          className="p-1 opacity-0 group-hover:opacity-100 hover:text-rose-500 transition"
-                          style={{ color: textSubtle }}
-                          title="Hapus baris ini"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Footer */}
-            <div
-              className="flex items-center justify-between text-[11px] pt-1"
-              style={{ borderTop: `1px solid ${cardBorderSubtle}`, color: textMuted }}
-            >
-              <span>Klik baris untuk salin</span>
-              <span
-                className="text-[10px] font-mono"
-                style={{ color: isDark ? 'rgba(245, 158, 11, 0.8)' : '#b45309' }}
-              >
-                Riwayat Clipboard
-              </span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
         )}
       </div>
+
+      {/* SATELLITE COLOR PALETTE (Expands Horizontally to the Right from Idle Notch only when >= 1 color is set) */}
+      {palette.length > 0 && (
+        <div
+          onMouseEnter={() => setIsPaletteHovered(true)}
+          onMouseLeave={() => setIsPaletteHovered(false)}
+          className={`absolute z-40 transition-all duration-400 ease-[cubic-bezier(0.16,1,0.3,1)] select-none flex items-center ${
+            isDark ? 'hig-glass-dark' : 'hig-glass-light'
+          } ${
+            state === 'pure-idle' || state === 'ambient-active'
+              ? 'opacity-100 pointer-events-auto'
+              : 'opacity-0 pointer-events-none'
+          } shadow-lg shadow-black/20`}
+          style={{
+            top: `${settings.verticalOffset}px`,
+            height: '34px',
+            borderRadius: '9999px',
+            left: `calc(50% + ${(state === 'ambient-active' ? 204 : 130) / 2 + 8}px)`,
+            width: isPaletteHovered ? `${Math.max(76, palette.length * 26 + 48)}px` : '34px',
+          }}
+        >
+          {!isPaletteHovered ? (
+            /* Collapsed Satellite: Single Glowing Swatch Orb */
+            <div className="w-full h-full flex items-center justify-center cursor-pointer relative group">
+              <div
+                className="w-4 h-4 rounded-full shadow-sm border border-white/25 transition-transform group-hover:scale-110"
+                style={{ backgroundColor: palette[activePaletteIdx]?.hex || palette[0]?.hex || '#2DD4BF' }}
+              />
+              {/* Tooltip on tiny hover */}
+              <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-black/90 px-1.5 py-0.5 rounded text-[9px] font-mono text-zinc-300 pointer-events-none whitespace-nowrap shadow">
+                Palet ({palette.length})
+              </div>
+            </div>
+          ) : (
+            /* Expanded Horizontal Ribbon: 1-8 Swatches + Eyedropper */
+            <div className="w-full h-full flex items-center justify-between px-2.5 gap-1 animate-in fade-in duration-200">
+              {/* Color Swatches */}
+              <div className="flex items-center gap-1.5">
+                {palette.map((color, idx) => {
+                  const isActive = activePaletteIdx === idx;
+                  const isCopied = copiedPaletteHex === color.hex;
+                  return (
+                    <button
+                      key={`${color.hex}-${idx}`}
+                      onClick={(e) => handleCopyPaletteColor(color, idx, e)}
+                      onContextMenu={(e) => handleRemovePaletteColor(idx, e)}
+                      className="relative group w-5 h-5 rounded-full flex items-center justify-center shrink-0 transition-transform hover:scale-125 active:scale-90 cursor-pointer shadow-sm"
+                      style={{
+                        backgroundColor: color.hex,
+                        outline: isActive ? '2px solid rgba(255, 255, 255, 0.8)' : 'none',
+                        outlineOffset: '1px',
+                      }}
+                      title={`${color.hex} (${color.name || 'Warna'}) - Klik kiri salin, Klik kanan hapus`}
+                    >
+                      {isCopied && (
+                        <Check className="w-3 h-3 text-black stroke-[3]" />
+                      )}
+
+                      {/* Floating Micro Tooltip */}
+                      <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-black/90 px-1.5 py-0.5 rounded text-[9px] font-mono text-white pointer-events-none whitespace-nowrap shadow-md z-50">
+                        {isCopied ? 'Tersalin!' : color.hex}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Hairline Divider */}
+              <div className="h-3.5 w-[1px] bg-white/20 shrink-0 mx-0.5" />
+
+              {/* Eyedropper / Sample Button */}
+              <button
+                onClick={handleOpenEyeDropper}
+                className="w-5 h-5 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/70 hover:text-white transition active:scale-90 cursor-pointer shrink-0"
+                title="Ambil Warna Baru (Eyedropper)"
+              >
+                <Pipette className="w-3 h-3" />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
