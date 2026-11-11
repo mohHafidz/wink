@@ -1,6 +1,6 @@
 [package]
 name = "wink"
-version = "1.2.5"
+version = "1.2.6"
 description = "Wink - The Dynamic Notch for Windows 11"
 authors = ["you"]
 edition = "2024"
