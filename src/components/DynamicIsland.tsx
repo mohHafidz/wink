@@ -22,6 +22,7 @@ import {
   Pipette,
   Plus,
   Palette,
+  Settings,
 } from 'lucide-react';
 import { check, Update } from '@tauri-apps/plugin-updater';
 import { startDrag } from '@crabnebula/tauri-plugin-drag';
@@ -849,6 +850,13 @@ export const DynamicIsland: React.FC = () => {
   // Escape key listener to dismiss pinned drawers or radial switcher, plus Arrow navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === ',') {
+        e.preventDefault();
+        if (isTauriEnv) {
+          invoke('open_settings_window');
+        }
+        return;
+      }
       if (e.key === 'Escape') {
         if (isRadialDialOpen) {
           setIsRadialDialOpen(false);
@@ -1321,6 +1329,13 @@ export const DynamicIsland: React.FC = () => {
         onClick={() => {
           if (hasPendingUpdate && (state === 'pure-idle' || state === 'ambient-active')) {
             setState('update-alert');
+          }
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (isTauriEnv) {
+            invoke('open_settings_window');
           }
         }}
         onMouseEnter={handleMouseEnter}
@@ -2253,26 +2268,41 @@ export const DynamicIsland: React.FC = () => {
                 />
               </div>
 
-              {/* Right: Next Slide Arrow Button */}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (slideIndex < 3) {
-                    if (slideIndex === 0) setState('pinned-shelf');
-                    else if (slideIndex === 1) setState('pinned-clip');
-                    else if (slideIndex === 2) setState('pinned-palette');
-                  }
-                }}
-                disabled={slideIndex === 3}
-                className={`w-6 h-5 rounded flex items-center justify-center transition-all ${
-                  slideIndex === 3
-                    ? 'opacity-20 text-white/30 cursor-default'
-                    : 'text-white/70 hover:text-white hover:bg-white/10 active:scale-90 cursor-pointer'
-                }`}
-                title="Slide Berikutnya"
-              >
-                <ChevronRight className="w-3.5 h-3.5" />
-              </button>
+              {/* Right: Next Slide Arrow Button + Settings Shortcut */}
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (slideIndex < 3) {
+                      if (slideIndex === 0) setState('pinned-shelf');
+                      else if (slideIndex === 1) setState('pinned-clip');
+                      else if (slideIndex === 2) setState('pinned-palette');
+                    }
+                  }}
+                  disabled={slideIndex === 3}
+                  className={`w-6 h-5 rounded flex items-center justify-center transition-all ${
+                    slideIndex === 3
+                      ? 'opacity-20 text-white/30 cursor-default'
+                      : 'text-white/70 hover:text-white hover:bg-white/10 active:scale-90 cursor-pointer'
+                  }`}
+                  title="Slide Berikutnya"
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+                <div className="w-[1px] h-2.5 bg-white/15 mx-0.5" />
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (isTauriEnv) {
+                      invoke('open_settings_window');
+                    }
+                  }}
+                  className="w-6 h-5 rounded flex items-center justify-center text-white/40 hover:text-teal-300 hover:bg-white/10 active:scale-90 transition-all cursor-pointer"
+                  title="Buka Pengaturan Wink (Ctrl+, atau Klik Kanan pulau)"
+                >
+                  <Settings className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           </div>
         )}
