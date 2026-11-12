@@ -75,6 +75,7 @@ export interface AudioDevice {
   name: string;
   shortName: string;
   type: 'headphone' | 'speaker' | 'display';
+  isDefault?: boolean;
 }
 
 const DEFAULT_AUDIO_DEVICES: AudioDevice[] = [
@@ -150,11 +151,37 @@ export const DynamicIsland: React.FC = () => {
   const [currentTime, setCurrentTime] = useState('11:18');
   const [isGsmtcActive, setIsGsmtcActive] = useState(false);
   const [liveTrack, setLiveTrack] = useState<Track | null>(() => !isTauriEnv ? DEFAULT_PLAYLIST[0] : null);
-  const [audioDevices] = useState<AudioDevice[]>(DEFAULT_AUDIO_DEVICES);
+  const [audioDevices, setAudioDevices] = useState<AudioDevice[]>(DEFAULT_AUDIO_DEVICES);
   const [activeDeviceId, setActiveDeviceId] = useState<string>('dev-headphone');
   const [isRadialDialOpen, setIsRadialDialOpen] = useState(false);
   const [hoveredRadialSector, setHoveredRadialSector] = useState<string | null>(null);
   const [audioFeedbackNotice, setAudioFeedbackNotice] = useState<string | null>(null);
+
+  const refreshAudioDevices = async () => {
+    if (!isTauriEnv) return;
+    try {
+      const devices = await invoke<AudioDevice[]>('get_audio_devices');
+      if (devices && devices.length > 0) {
+        setAudioDevices(devices);
+        const defaultDev = devices.find((d) => d.isDefault) || devices[0];
+        if (defaultDev) {
+          setActiveDeviceId(defaultDev.id);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch audio devices:', err);
+    }
+  };
+
+  useEffect(() => {
+    refreshAudioDevices();
+  }, []);
+
+  useEffect(() => {
+    if (isRadialDialOpen) {
+      refreshAudioDevices();
+    }
+  }, [isRadialDialOpen]);
   const [palette, setPalette] = useState<PaletteColor[]>(() => {
     if (typeof window !== 'undefined') {
       try {
@@ -212,15 +239,17 @@ export const DynamicIsland: React.FC = () => {
   });
   const updateToastTimerRef = useRef<number | null>(null);
 
-  const activeDevice = audioDevices.find((d) => d.id === activeDeviceId) || audioDevices[0];
-  const renderDeviceIcon = (type: AudioDevice['type'], className = 'w-3.5 h-3.5') => {
+  const activeDevice =
+    audioDevices.find((d) => d.id === activeDeviceId) || audioDevices[0] || DEFAULT_AUDIO_DEVICES[0];
+  const renderDeviceIcon = (type: AudioDevice['type'] | string, className = 'w-3.5 h-3.5') => {
     switch (type) {
       case 'headphone':
         return <Headphones className={className} />;
-      case 'speaker':
-        return <Volume2 className={className} />;
       case 'display':
         return <Tv className={className} />;
+      case 'speaker':
+      default:
+        return <Volume2 className={className} />;
     }
   };
 
@@ -2034,9 +2063,11 @@ export const DynamicIsland: React.FC = () => {
                   <div className="relative flex items-center justify-center">
                     <svg width="76" height="76" viewBox="0 0 76 76" className="drop-shadow-xl overflow-visible">
                       {audioDevices.map((device, idx) => {
-                        const startAngle = 210 + idx * 120;
-                        const endAngle = startAngle + 120;
-                        const midAngle = startAngle + 60;
+                        const count = Math.max(1, audioDevices.length);
+                        const sliceAngle = 360 / count;
+                        const startAngle = -90 + idx * sliceAngle;
+                        const endAngle = startAngle + sliceAngle;
+                        const midAngle = startAngle + sliceAngle / 2;
                         const midRad = (midAngle * Math.PI) / 180;
                         const iconDist = 26.5;
                         const iconX = 38 + iconDist * Math.cos(midRad) - 6;
@@ -2044,6 +2075,7 @@ export const DynamicIsland: React.FC = () => {
 
                         const isHovered = hoveredRadialSector === device.id;
                         const isActive = activeDeviceId === device.id;
+                        const gap = count > 1 ? (count >= 5 ? 1.5 : 2) : 0;
 
                         return (
                           <g
@@ -2051,15 +2083,26 @@ export const DynamicIsland: React.FC = () => {
                             className="cursor-pointer transition-all duration-150"
                             onMouseEnter={() => setHoveredRadialSector(device.id)}
                             onMouseLeave={() => setHoveredRadialSector(null)}
-                            onClick={() => {
+                            onClick={async () => {
                               setActiveDeviceId(device.id);
                               setAudioFeedbackNotice(`Output: ${device.shortName}`);
+                              if (isTauriEnv) {
+                                try {
+                                  await invoke('set_default_audio_device', { id: device.id });
+                                } catch (err) {
+                                  console.error('Failed to set default audio device:', err);
+                                }
+                              }
                               setIsRadialDialOpen(false);
                               setTimeout(() => setAudioFeedbackNotice(null), 1800);
                             }}
                           >
                             <path
-                              d={getSectorPath(38, 38, 17, 36, startAngle + 2, endAngle - 2)}
+                              d={
+                                count === 1
+                                  ? getSectorPath(38, 38, 17, 36, 0, 359.99)
+                                  : getSectorPath(38, 38, 17, 36, startAngle + gap, endAngle - gap)
+                              }
                               fill={
                                 isHovered
                                   ? 'rgba(45, 212, 191, 0.45)'

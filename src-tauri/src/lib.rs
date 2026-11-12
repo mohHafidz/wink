@@ -1,3 +1,4 @@
+mod audio_devices;
 mod clipboard;
 mod media;
 mod monitor;
@@ -136,6 +137,16 @@ fn move_to_monitor(window: tauri::WebviewWindow, index: usize) -> Result<(), Str
     monitor::move_window_to_monitor(&window, index)
 }
 
+#[tauri::command]
+fn get_audio_devices() -> Vec<audio_devices::AudioDeviceInfo> {
+    audio_devices::get_audio_endpoints()
+}
+
+#[tauri::command]
+fn set_default_audio_device(id: String) -> Result<(), String> {
+    audio_devices::set_default_audio_endpoint(&id)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -199,7 +210,9 @@ pub fn run() {
             open_settings_window,
             move_to_monitor,
             get_app_settings,
-            save_app_settings
+            save_app_settings,
+            get_audio_devices,
+            set_default_audio_device
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
