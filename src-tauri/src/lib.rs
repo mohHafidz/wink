@@ -109,6 +109,11 @@ fn update_capsule_bounds(x: i32, y: i32, width: i32, height: i32) {
 }
 
 #[tauri::command]
+fn update_satellite_bounds(bounds: Option<(i32, i32, i32, i32)>) {
+    monitor::update_satellite_bounds(bounds);
+}
+
+#[tauri::command]
 fn get_volume_status() -> (i32, bool) {
     (volume::get_master_volume_percent(), volume::has_volume_changed())
 }
@@ -137,6 +142,18 @@ fn save_app_settings(app: tauri::AppHandle, settings: settings::AppSettings) -> 
         settings.color_picker_shortcut.clone(),
     );
     settings::save_settings(&app, &settings)
+}
+
+#[tauri::command]
+fn start_color_picker(app: tauri::AppHandle) -> Result<(), String> {
+    color_picker::start_interactive_picker(app);
+    Ok(())
+}
+
+#[tauri::command]
+fn cancel_color_picker() -> Result<(), String> {
+    color_picker::cancel_interactive_picker();
+    Ok(())
 }
 
 #[tauri::command]
@@ -261,6 +278,7 @@ pub fn run() {
             is_foreground_maximized,
             is_game_fullscreen,
             update_capsule_bounds,
+            update_satellite_bounds,
             get_volume_status,
             open_settings_window,
             move_to_monitor,
@@ -268,7 +286,9 @@ pub fn run() {
             save_app_settings,
             get_audio_devices,
             set_default_audio_device,
-            pick_screen_color
+            pick_screen_color,
+            start_color_picker,
+            cancel_color_picker
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

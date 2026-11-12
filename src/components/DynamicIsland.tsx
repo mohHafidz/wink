@@ -200,6 +200,23 @@ export const DynamicIsland: React.FC = () => {
   const [activePaletteIdx, setActivePaletteIdx] = useState(0);
   const [isPaletteHovered, setIsPaletteHovered] = useState(false);
   const [copiedPaletteHex, setCopiedPaletteHex] = useState<string | null>(null);
+  const [isColorPicking, setIsColorPicking] = useState(false);
+  const [pickerPreviewHex, setPickerPreviewHex] = useState<string | null>(null);
+
+  // Synchronize satellite palette ribbon bounding box with Rust backend for seamless hover hit-testing
+  useEffect(() => {
+    if (!isTauriEnv) return;
+    if (palette.length > 0 && (state === 'pure-idle' || state === 'ambient-active')) {
+      const cw = state === 'ambient-active' ? 204 : 130;
+      const sx = Math.round(760 / 2 + cw / 2 + 8);
+      const sy = settings.verticalOffset;
+      const sw = isPaletteHovered ? Math.max(76, palette.length * 26 + 48) : 34;
+      const sh = 34;
+      invoke('update_satellite_bounds', { bounds: [sx, sy, sw, sh] }).catch(() => {});
+    } else {
+      invoke('update_satellite_bounds', { bounds: null }).catch(() => {});
+    }
+  }, [palette.length, state, isPaletteHovered, settings.verticalOffset, isTauriEnv]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -439,68 +456,74 @@ export const DynamicIsland: React.FC = () => {
     let h = 34;
     let top = settings.verticalOffset;
 
-    switch (state) {
-      case 'stealth-micro':
-        // Hitbox pad (56x8px) di level hit-test OS agar kursor mudah menyentuh micro-pill
-        w = isStealthPeeking ? 76 : 56;
-        h = isStealthPeeking ? 16 : 8;
-        top = 0;
-        break;
-      case 'pure-idle':
-        w = 130;
-        h = 34;
-        top = settings.verticalOffset;
-        break;
-      case 'ambient-active':
-        w = 204;
-        h = 34;
-        top = settings.verticalOffset;
-        break;
-      case 'update-alert':
-        w = 375;
-        h = 48;
-        top = settings.verticalOffset;
-        break;
-      case 'update-downloading':
-        w = 330;
-        h = 44;
-        top = settings.verticalOffset;
-        break;
-      case 'update-ready':
-        w = 340;
-        h = 48;
-        top = settings.verticalOffset;
-        break;
-      case 'transient-toast':
-        w = 340;
-        h = 46;
-        top = settings.verticalOffset;
-        break;
-      case 'hover-media':
-        w = 464;
-        h = 194;
-        top = 0;
-        break;
-      case 'pinned-shelf':
-        w = 464;
-        h = 194;
-        top = 0;
-        break;
-      case 'pinned-clip':
-      case 'pinned-palette':
-        w = 464;
-        h = 194;
-        top = 0;
-        break;
-      case 'volume-hud':
-        w = 210;
-        h = 36;
-        top = previousNonVolumeState === 'stealth-micro' ? 0 : settings.verticalOffset;
-        break;
+    if (isColorPicking) {
+      w = 380;
+      h = 36;
+      top = settings.verticalOffset;
+    } else {
+      switch (state) {
+        case 'stealth-micro':
+          // Hitbox pad (56x8px) di level hit-test OS agar kursor mudah menyentuh micro-pill
+          w = isStealthPeeking ? 76 : 56;
+          h = isStealthPeeking ? 16 : 8;
+          top = 0;
+          break;
+        case 'pure-idle':
+          w = 130;
+          h = 34;
+          top = settings.verticalOffset;
+          break;
+        case 'ambient-active':
+          w = 204;
+          h = 34;
+          top = settings.verticalOffset;
+          break;
+        case 'update-alert':
+          w = 375;
+          h = 48;
+          top = settings.verticalOffset;
+          break;
+        case 'update-downloading':
+          w = 330;
+          h = 44;
+          top = settings.verticalOffset;
+          break;
+        case 'update-ready':
+          w = 340;
+          h = 48;
+          top = settings.verticalOffset;
+          break;
+        case 'transient-toast':
+          w = 340;
+          h = 46;
+          top = settings.verticalOffset;
+          break;
+        case 'hover-media':
+          w = 464;
+          h = 194;
+          top = 0;
+          break;
+        case 'pinned-shelf':
+          w = 464;
+          h = 194;
+          top = 0;
+          break;
+        case 'pinned-clip':
+        case 'pinned-palette':
+          w = 464;
+          h = 194;
+          top = 0;
+          break;
+        case 'volume-hud':
+          w = 210;
+          h = 36;
+          top = previousNonVolumeState === 'stealth-micro' ? 0 : settings.verticalOffset;
+          break;
+      }
     }
 
-    // Window canvas is 600px wide, centered horizontally
-    const left = Math.round((600 - w) / 2);
+    // Window canvas is 760px wide, centered horizontally
+    const left = Math.round((760 - w) / 2);
     if (isTauriEnv) {
       try {
         invoke('update_capsule_bounds', { x: left, y: top, width: w, height: h });
@@ -508,7 +531,7 @@ export const DynamicIsland: React.FC = () => {
         // Fallback
       }
     }
-  }, [state, isStealthPeeking, previousNonVolumeState, settings.verticalOffset]);
+  }, [state, isColorPicking, isStealthPeeking, previousNonVolumeState, settings.verticalOffset, isTauriEnv]);
 
   const currentTrack = liveTrack || playlist[trackIdx];
 
@@ -1165,8 +1188,18 @@ export const DynamicIsland: React.FC = () => {
 
   const handleOpenEyeDropper = async (e?: React.MouseEvent) => {
     e?.stopPropagation();
-    let hex: string | null = null;
 
+    // In Tauri environment, start interactive session with crosshair cursor and live preview
+    if (isTauriEnv) {
+      try {
+        await invoke('start_color_picker');
+        return;
+      } catch (err) {
+        console.warn('Native interactive color picker start error:', err);
+      }
+    }
+
+    let hex: string | null = null;
     if (typeof window !== 'undefined' && 'EyeDropper' in window) {
       try {
         const eyeDropper = new (window as any).EyeDropper();
@@ -1176,15 +1209,6 @@ export const DynamicIsland: React.FC = () => {
         }
       } catch (err: any) {
         if (err?.name === 'AbortError') return; // User pressed Escape
-      }
-    }
-
-    // Native Windows pixel sampling fallback via Rust command
-    if (!hex && isTauriEnv) {
-      try {
-        hex = await invoke<string>('pick_screen_color');
-      } catch (err) {
-        console.warn('Native screen color picker fallback error:', err);
       }
     }
 
@@ -1210,11 +1234,32 @@ export const DynamicIsland: React.FC = () => {
     }
   };
 
-  // 1. Global OS Shortcut Listener from Rust (Works globally across all Windows apps)
+  // Global Color Picker & Shortcut Event Listeners from Rust backend
   useEffect(() => {
     if (!isTauriEnv) return;
-    let unlisten: (() => void) | undefined;
+    const cleanups: (() => void)[] = [];
+
+    // 1. Color Picker Started: enter interactive mode
+    listen('color-picker-started', () => {
+      setIsColorPicking(true);
+      setPickerPreviewHex(null);
+    })
+      .then((fn) => cleanups.push(fn))
+      .catch((e) => console.warn('color-picker-started listener error:', e));
+
+    // 2. Real-time preview as cursor moves over any screen pixel
+    listen<{ hex: string; x: number; y: number }>('color-picker-preview', (event) => {
+      if (event.payload?.hex) {
+        setPickerPreviewHex(event.payload.hex);
+      }
+    })
+      .then((fn) => cleanups.push(fn))
+      .catch((e) => console.warn('color-picker-preview listener error:', e));
+
+    // 3. User clicked: color picked!
     listen<{ hex: string }>('palette-color-picked', (event) => {
+      setIsColorPicking(false);
+      setPickerPreviewHex(null);
       const hex = event.payload?.hex;
       if (hex) {
         handleAddColorToPalette(hex);
@@ -1226,13 +1271,19 @@ export const DynamicIsland: React.FC = () => {
         }, 1800);
       }
     })
-      .then((fn) => {
-        unlisten = fn;
-      })
+      .then((fn) => cleanups.push(fn))
       .catch((e) => console.warn('palette-color-picked listener error:', e));
 
+    // 4. Cancelled via ESC or Right-click
+    listen('color-picker-cancelled', () => {
+      setIsColorPicking(false);
+      setPickerPreviewHex(null);
+    })
+      .then((fn) => cleanups.push(fn))
+      .catch((e) => console.warn('color-picker-cancelled listener error:', e));
+
     return () => {
-      if (unlisten) unlisten();
+      cleanups.forEach((fn) => fn());
     };
   }, [isTauriEnv]);
 
@@ -1264,6 +1315,15 @@ export const DynamicIsland: React.FC = () => {
 
   // --- Capsule Geometry per State ---
   const getCapsuleStyles = (): React.CSSProperties => {
+    if (isColorPicking) {
+      return {
+        top: `${settings.verticalOffset}px`,
+        width: '380px',
+        height: '36px',
+        borderRadius: '9999px',
+      };
+    }
+
     switch (state) {
       case 'stealth-micro':
         return {
@@ -1421,7 +1481,42 @@ export const DynamicIsland: React.FC = () => {
           transitionDuration: settings.animDuration,
         }}
       >
-        {/* State 0: Stealth Micro-Pill */}
+        {/* INTERACTIVE COLOR PICKER HUD */}
+        {isColorPicking ? (
+          <div className="w-full h-full flex items-center justify-between px-3 select-none animate-in fade-in duration-150">
+            <div className="flex items-center gap-2">
+              <div className="w-5 h-5 rounded-full bg-teal-500/20 flex items-center justify-center text-teal-300">
+                <Pipette className="w-3 h-3 animate-pulse" />
+              </div>
+              <span className="text-[11px] font-medium text-white/90">Arahkan kursor & Klik Kiri untuk ambil warna</span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {pickerPreviewHex && (
+                <div className="flex items-center gap-1.5 bg-black/40 px-2.5 py-0.5 rounded-full border border-white/10">
+                  <div
+                    className="w-3 h-3 rounded-full border border-white/40 shadow-sm"
+                    style={{ backgroundColor: pickerPreviewHex }}
+                  />
+                  <span className="font-mono text-[10px] text-teal-300 font-semibold">{pickerPreviewHex}</span>
+                </div>
+              )}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (isTauriEnv) invoke('cancel_color_picker').catch(() => {});
+                  setIsColorPicking(false);
+                }}
+                className="text-[10px] text-white/50 hover:text-white bg-white/5 hover:bg-white/10 px-2 py-0.5 rounded-md transition cursor-pointer"
+                title="Batal pemilihan warna (atau tekan tombol ESC / klik kanan)"
+              >
+                ESC Batal
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* State 0: Stealth Micro-Pill */}
         {state === 'stealth-micro' && (
           <div
             onClick={() => setState('hover-media')}
@@ -2389,6 +2484,8 @@ export const DynamicIsland: React.FC = () => {
               </div>
             </div>
           </div>
+        )}
+          </>
         )}
       </div>
 

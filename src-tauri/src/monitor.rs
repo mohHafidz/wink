@@ -35,6 +35,7 @@ static CURRENT_MONITOR_IDX: AtomicUsize = AtomicUsize::new(0);
 static FOREGROUND_MAXIMIZED: AtomicBool = AtomicBool::new(false);
 static IS_FULLSCREEN_GAME: AtomicBool = AtomicBool::new(false);
 static CAPSULE_RECT: Mutex<(i32, i32, i32, i32)> = Mutex::new((235, 8, 130, 34));
+static SATELLITE_RECT: Mutex<Option<(i32, i32, i32, i32)>> = Mutex::new(None);
 
 /// Checks if Windows detects an active full-screen DirectX/3D game (e.g. Valorant, CS2, etc.)
 pub fn is_d3d_game_running() -> bool {
@@ -56,10 +57,24 @@ pub fn update_capsule_bounds(x: i32, y: i32, width: i32, height: i32) {
     *lock = (x, y, width, height);
 }
 
+pub fn update_satellite_bounds(bounds: Option<(i32, i32, i32, i32)>) {
+    let mut lock = SATELLITE_RECT.lock().unwrap();
+    *lock = bounds;
+}
+
 pub fn is_point_inside_capsule(px: i32, py: i32) -> bool {
-    let lock = CAPSULE_RECT.lock().unwrap();
-    let (x, y, w, h) = *lock;
-    px >= x && px <= (x + w) && py >= y && py <= (y + h)
+    let (cx, cy, cw, ch) = *CAPSULE_RECT.lock().unwrap();
+    if px >= cx && px <= (cx + cw) && py >= cy && py <= (cy + ch) {
+        return true;
+    }
+
+    if let Some((sx, sy, sw, sh)) = *SATELLITE_RECT.lock().unwrap() {
+        if px >= sx && px <= (sx + sw) && py >= sy && py <= (sy + sh) {
+            return true;
+        }
+    }
+
+    false
 }
 
 /// Checks if a window class belongs to Windows Shell (Taskbar, Start Menu, Search, Action Center)
