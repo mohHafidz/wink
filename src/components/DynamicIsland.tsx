@@ -221,6 +221,7 @@ export const DynamicIsland: React.FC = () => {
 
   const toastTimeoutRef = useRef<number | null>(null);
   const hoverDebounceRef = useRef<number | null>(null);
+  const leaveTimeoutRef = useRef<number | null>(null);
   const stealthRestoreRef = useRef<number | null>(null);
   const stealthPulseTimeoutRef = useRef<number | null>(null);
   const volumeTimeoutRef = useRef<number | null>(null);
@@ -476,19 +477,19 @@ export const DynamicIsland: React.FC = () => {
         top = settings.verticalOffset;
         break;
       case 'hover-media':
-        w = 456;
-        h = 184;
+        w = 464;
+        h = 194;
         top = 0;
         break;
       case 'pinned-shelf':
-        w = 456;
-        h = 184;
+        w = 464;
+        h = 194;
         top = 0;
         break;
       case 'pinned-clip':
       case 'pinned-palette':
-        w = 456;
-        h = 184;
+        w = 464;
+        h = 194;
         top = 0;
         break;
       case 'volume-hud':
@@ -899,12 +900,16 @@ export const DynamicIsland: React.FC = () => {
     return map[hex.toUpperCase()] || '#1c1f26';
   };
 
-  // --- Hover interaction handlers with 80ms intent guard ---
+  // --- Hover interaction handlers with 80ms intent guard & 380ms leave buffer ---
   const handleMouseEnter = () => {
     // Solusi 1: Jika sedang dalam game fullscreen, abaikan total event mouse hover
     if (isGameFullscreen) return;
 
     isCapsuleHoveredRef.current = true;
+    if (leaveTimeoutRef.current) {
+      clearTimeout(leaveTimeoutRef.current);
+      leaveTimeoutRef.current = null;
+    }
     if (stealthRestoreRef.current) clearTimeout(stealthRestoreRef.current);
     if (stealthPulseTimeoutRef.current) clearTimeout(stealthPulseTimeoutRef.current);
     setIsStealthPeeking(false);
@@ -921,15 +926,21 @@ export const DynamicIsland: React.FC = () => {
   const handleMouseLeave = () => {
     isCapsuleHoveredRef.current = false;
     if (hoverDebounceRef.current) clearTimeout(hoverDebounceRef.current);
-    setIsRadialDialOpen(false);
-    setHoveredRadialSector(null);
-    if (state === 'hover-media') {
-      if (isForegroundMax) {
-        setState('stealth-micro');
-      } else {
-        setState(isPlaying ? 'ambient-active' : 'pure-idle');
+    if (leaveTimeoutRef.current) clearTimeout(leaveTimeoutRef.current);
+
+    // 380ms grace period so moving near edge or clicking slider/dots won't accidentally collapse island
+    leaveTimeoutRef.current = window.setTimeout(() => {
+      if (isCapsuleHoveredRef.current) return;
+      setIsRadialDialOpen(false);
+      setHoveredRadialSector(null);
+      if (state === 'hover-media') {
+        if (isForegroundMax) {
+          setState('stealth-micro');
+        } else {
+          setState(isPlaying ? 'ambient-active' : 'pure-idle');
+        }
       }
-    }
+    }, 380);
   };
 
   // --- Media Controls with Windows GSMTC Bridge ---
@@ -1113,7 +1124,19 @@ export const DynamicIsland: React.FC = () => {
     e?.stopPropagation();
     e?.preventDefault();
     setPalette((prev) => prev.filter((_, i) => i !== idx));
-    setActivePaletteIdx((prev) => Math.max(0, Math.min(prev, palette.length - 2)));
+    setActivePaletteIdx((prev) => Math.max(0, Math.min(prev, Math.max(0, palette.length - 2))));
+    setAudioFeedbackNotice('Warna dihapus');
+    setTimeout(() => setAudioFeedbackNotice(null), 1200);
+  };
+
+  const handleClearAllPalette = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    e?.preventDefault();
+    setPalette([]);
+    setActivePaletteIdx(0);
+    setCopiedPaletteHex(null);
+    setAudioFeedbackNotice('Palet warna dikosongkan');
+    setTimeout(() => setAudioFeedbackNotice(null), 1500);
   };
 
   const handleCopyPaletteColor = (color: PaletteColor, idx: number, e?: React.MouseEvent) => {
@@ -1142,30 +1165,78 @@ export const DynamicIsland: React.FC = () => {
 
   const handleOpenEyeDropper = async (e?: React.MouseEvent) => {
     e?.stopPropagation();
+    let hex: string | null = null;
+
     if (typeof window !== 'undefined' && 'EyeDropper' in window) {
       try {
         const eyeDropper = new (window as any).EyeDropper();
         const result = await eyeDropper.open();
         if (result && result.sRGBHex) {
-          const hex = result.sRGBHex.toUpperCase();
-          handleAddColorToPalette(hex);
-          setCopiedPaletteHex(hex);
-          navigator.clipboard?.writeText(hex);
-          setTimeout(() => setCopiedPaletteHex(null), 1200);
+          hex = result.sRGBHex.toUpperCase();
         }
-      } catch {
-        // User cancelled
+      } catch (err: any) {
+        if (err?.name === 'AbortError') return; // User pressed Escape
       }
-    } else {
-      // Web fallback if EyeDropper not available
+    }
+
+    // Native Windows pixel sampling fallback via Rust command
+    if (!hex && isTauriEnv) {
+      try {
+        hex = await invoke<string>('pick_screen_color');
+      } catch (err) {
+        console.warn('Native screen color picker fallback error:', err);
+      }
+    }
+
+    // Browser-only fallback
+    if (!hex && !isTauriEnv) {
       const input = window.prompt('Masukkan kode warna HEX untuk ditambahkan ke palet:', '#38BDF8');
       if (input && /^#[0-9A-Fa-f]{3,8}$/.test(input.trim())) {
-        handleAddColorToPalette(input.trim().toUpperCase());
+        hex = input.trim().toUpperCase();
       }
+    }
+
+    if (hex) {
+      handleAddColorToPalette(hex);
+      setCopiedPaletteHex(hex);
+      setAudioFeedbackNotice(`Warna Tersalin: ${hex}`);
+      try {
+        await navigator.clipboard?.writeText(hex);
+      } catch {}
+      setTimeout(() => {
+        setCopiedPaletteHex(null);
+        setAudioFeedbackNotice(null);
+      }, 1800);
     }
   };
 
-  // Keyboard shortcut listener for Color Picker
+  // 1. Global OS Shortcut Listener from Rust (Works globally across all Windows apps)
+  useEffect(() => {
+    if (!isTauriEnv) return;
+    let unlisten: (() => void) | undefined;
+    listen<{ hex: string }>('palette-color-picked', (event) => {
+      const hex = event.payload?.hex;
+      if (hex) {
+        handleAddColorToPalette(hex);
+        setCopiedPaletteHex(hex);
+        setAudioFeedbackNotice(`Warna Tersalin: ${hex}`);
+        setTimeout(() => {
+          setCopiedPaletteHex(null);
+          setAudioFeedbackNotice(null);
+        }, 1800);
+      }
+    })
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch((e) => console.warn('palette-color-picked listener error:', e));
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [isTauriEnv]);
+
+  // 2. Local in-app shortcut listener when Wink window has focus
   useEffect(() => {
     if (!settings.colorPickerShortcutEnabled) return;
 
@@ -1967,15 +2038,12 @@ export const DynamicIsland: React.FC = () => {
                       </button>
                       {palette.length > 0 && (
                         <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setPalette([]);
-                          }}
-                          className="text-[10px] hover:text-rose-500 transition flex items-center gap-1 cursor-pointer"
+                          onClick={handleClearAllPalette}
+                          className="text-[10px] hover:text-rose-400 transition flex items-center gap-1 cursor-pointer px-1.5 py-0.5 rounded bg-white/5 hover:bg-rose-500/10 active:scale-95"
                           style={{ color: textSubtle }}
                           title="Kosongkan Semua Warna di Palet"
                         >
-                          <Trash2 className="w-3 h-3" />
+                          <Trash2 className="w-3 h-3 text-rose-400" />
                           <span>Kosongkan</span>
                         </button>
                       )}
@@ -2003,9 +2071,10 @@ export const DynamicIsland: React.FC = () => {
                           <div
                             key={`${color.hex}-${idx}`}
                             onClick={(e) => handleCopyPaletteColor(color, idx, e)}
-                            className="group relative flex flex-col items-center justify-center p-1.5 rounded-xl transition cursor-pointer hover:scale-[1.02] active:scale-95 shadow-sm"
+                            onContextMenu={(e) => handleRemovePaletteColor(idx, e)}
+                            className="group relative flex flex-col items-center justify-center p-1.5 rounded-xl transition cursor-pointer hover:scale-[1.03] active:scale-95 shadow-sm"
                             style={{ background: cardBg, border: `1px solid ${cardBorder}` }}
-                            title={`${color.hex} - Klik untuk salin`}
+                            title={`${color.hex} • Klik untuk salin • Klik Kanan untuk hapus`}
                           >
                             <div
                               className="w-6 h-6 rounded-full shadow-inner border border-white/20 flex items-center justify-center mb-1 shrink-0"
@@ -2018,11 +2087,10 @@ export const DynamicIsland: React.FC = () => {
                             </span>
                             <button
                               onClick={(e) => handleRemovePaletteColor(idx, e)}
-                              className="absolute top-1 right-1 p-0.5 opacity-0 group-hover:opacity-100 hover:text-rose-500 rounded-full hover:bg-white/10 transition cursor-pointer"
-                              style={{ color: textSubtle }}
-                              title="Hapus warna ini"
+                              className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 hover:text-rose-400 text-white/50 rounded-full hover:bg-rose-500/20 transition-all cursor-pointer z-10"
+                              title="Hapus warna ini (atau Klik Kanan)"
                             >
-                              <X className="w-2.5 h-2.5" />
+                              <X className="w-3 h-3" />
                             </button>
                           </div>
                         );
@@ -2032,13 +2100,13 @@ export const DynamicIsland: React.FC = () => {
                         <button
                           key={`empty-slot-${slotIdx}`}
                           onClick={handleOpenEyeDropper}
-                          className="flex flex-col items-center justify-center p-1.5 rounded-xl border border-dashed border-white/10 hover:border-purple-400/40 hover:bg-white/[0.02] transition cursor-pointer group"
-                          title="Klik untuk tambah warna baru"
+                          className="flex flex-col items-center justify-center p-1.5 rounded-xl border border-dashed border-white/10 hover:border-purple-400/40 hover:bg-purple-500/5 transition cursor-pointer group active:scale-95"
+                          title="Klik untuk ambil/tambah warna baru"
                         >
                           <div className="w-5 h-5 rounded-full border border-dashed border-white/20 flex items-center justify-center mb-1 group-hover:border-purple-400 transition">
                             <Plus className="w-2.5 h-2.5 text-white/40 group-hover:text-purple-400 transition" />
                           </div>
-                          <span className="text-[9px] font-mono text-white/30 group-hover:text-purple-400/70 transition">
+                          <span className="text-[9px] font-mono text-white/30 group-hover:text-purple-400/80 transition">
                             + Slot
                           </span>
                         </button>
@@ -2190,9 +2258,9 @@ export const DynamicIsland: React.FC = () => {
               </div>
             )}
 
-            {/* UNIFIED PERSISTENT FOOTER & CAROUSEL DOTS (Dead-centered across all 3 slides) */}
+            {/* UNIFIED PERSISTENT FOOTER & CAROUSEL DOTS (Dead-centered across all 4 slides) */}
             <div
-              className="w-full h-6 shrink-0 flex items-center justify-between px-3 relative border-t select-none"
+              className="w-full h-8 shrink-0 flex items-center justify-between px-6 pb-1 relative border-t select-none"
               style={{ borderColor: cardBorderSubtle, color: textMuted }}
             >
               {/* Left: Previous Slide Arrow Button */}
@@ -2206,70 +2274,86 @@ export const DynamicIsland: React.FC = () => {
                   }
                 }}
                 disabled={slideIndex === 0}
-                className={`w-6 h-5 rounded flex items-center justify-center transition-all ${
+                className={`w-7 h-6 rounded-lg flex items-center justify-center transition-all ${
                   slideIndex === 0
                     ? 'opacity-20 text-white/30 cursor-default'
                     : 'text-white/70 hover:text-white hover:bg-white/10 active:scale-90 cursor-pointer'
                 }`}
                 title="Slide Sebelumnya"
               >
-                <ChevronLeft className="w-3.5 h-3.5" />
+                <ChevronLeft className="w-4 h-4" />
               </button>
 
               {/* CENTER: ROCK-SOLID CAROUSEL DOTS - COMPLETELY FIXED IN POSITION */}
-              <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1.5 z-20">
+              <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1 z-20">
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     setState('hover-media');
                   }}
-                  className={`h-1 rounded-full transition-all duration-300 cursor-pointer ${
-                    slideIndex === 0
-                      ? 'w-4 bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.6)]'
-                      : 'w-1.5 bg-white/30 hover:bg-white/60'
-                  }`}
+                  className="py-2 px-1.5 cursor-pointer group flex items-center justify-center"
                   title="Slide 1: Kontrol Media"
-                />
+                >
+                  <div
+                    className={`h-1.5 rounded-full transition-all duration-300 ${
+                      slideIndex === 0
+                        ? 'w-5 bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.6)]'
+                        : 'w-2 bg-white/30 group-hover:bg-white/60'
+                    }`}
+                  />
+                </button>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     setState('pinned-shelf');
                   }}
-                  className={`h-1 rounded-full transition-all duration-300 cursor-pointer ${
-                    slideIndex === 1
-                      ? 'w-4 bg-teal-400 shadow-[0_0_8px_rgba(45,212,191,0.6)]'
-                      : 'w-1.5 bg-white/30 hover:bg-white/60'
-                  }`}
+                  className="py-2 px-1.5 cursor-pointer group flex items-center justify-center"
                   title={`Slide 2: Drop Shelf (${shelfFiles.length} berkas)`}
-                />
+                >
+                  <div
+                    className={`h-1.5 rounded-full transition-all duration-300 ${
+                      slideIndex === 1
+                        ? 'w-5 bg-teal-400 shadow-[0_0_8px_rgba(45,212,191,0.6)]'
+                        : 'w-2 bg-white/30 group-hover:bg-white/60'
+                    }`}
+                  />
+                </button>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     setState('pinned-clip');
                   }}
-                  className={`h-1 rounded-full transition-all duration-300 cursor-pointer ${
-                    slideIndex === 2
-                      ? 'w-4 bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]'
-                      : 'w-1.5 bg-white/30 hover:bg-white/60'
-                  }`}
+                  className="py-2 px-1.5 cursor-pointer group flex items-center justify-center"
                   title={`Slide 3: Riwayat Clipboard (${clipboard.length} klip)`}
-                />
+                >
+                  <div
+                    className={`h-1.5 rounded-full transition-all duration-300 ${
+                      slideIndex === 2
+                        ? 'w-5 bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]'
+                        : 'w-2 bg-white/30 group-hover:bg-white/60'
+                    }`}
+                  />
+                </button>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     setState('pinned-palette');
                   }}
-                  className={`h-1 rounded-full transition-all duration-300 cursor-pointer ${
-                    slideIndex === 3
-                      ? 'w-4 bg-purple-400 shadow-[0_0_8px_rgba(192,132,252,0.6)]'
-                      : 'w-1.5 bg-white/30 hover:bg-white/60'
-                  }`}
+                  className="py-2 px-1.5 cursor-pointer group flex items-center justify-center"
                   title={`Slide 4: Palet Warna (${palette.length}/8 warna)`}
-                />
+                >
+                  <div
+                    className={`h-1.5 rounded-full transition-all duration-300 ${
+                      slideIndex === 3
+                        ? 'w-5 bg-purple-400 shadow-[0_0_8px_rgba(192,132,252,0.6)]'
+                        : 'w-2 bg-white/30 group-hover:bg-white/60'
+                    }`}
+                  />
+                </button>
               </div>
 
               {/* Right: Next Slide Arrow Button + Settings Shortcut */}
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1.5">
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -2280,16 +2364,16 @@ export const DynamicIsland: React.FC = () => {
                     }
                   }}
                   disabled={slideIndex === 3}
-                  className={`w-6 h-5 rounded flex items-center justify-center transition-all ${
+                  className={`w-7 h-6 rounded-lg flex items-center justify-center transition-all ${
                     slideIndex === 3
                       ? 'opacity-20 text-white/30 cursor-default'
                       : 'text-white/70 hover:text-white hover:bg-white/10 active:scale-90 cursor-pointer'
                   }`}
                   title="Slide Berikutnya"
                 >
-                  <ChevronRight className="w-3.5 h-3.5" />
+                  <ChevronRight className="w-4 h-4" />
                 </button>
-                <div className="w-[1px] h-2.5 bg-white/15 mx-0.5" />
+                <div className="w-[1px] h-3 bg-white/15 mx-0.5" />
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -2297,7 +2381,7 @@ export const DynamicIsland: React.FC = () => {
                       invoke('open_settings_window');
                     }
                   }}
-                  className="w-6 h-5 rounded flex items-center justify-center text-white/40 hover:text-teal-300 hover:bg-white/10 active:scale-90 transition-all cursor-pointer"
+                  className="w-7 h-6 rounded-lg flex items-center justify-center text-white/40 hover:text-teal-300 hover:bg-white/10 active:scale-90 transition-all cursor-pointer"
                   title="Buka Pengaturan Wink (Ctrl+, atau Klik Kanan pulau)"
                 >
                   <Settings className="w-3.5 h-3.5" />

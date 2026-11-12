@@ -1,5 +1,6 @@
 mod audio_devices;
 mod clipboard;
+mod color_picker;
 mod media;
 mod monitor;
 mod settings;
@@ -131,7 +132,18 @@ fn get_app_settings(app: tauri::AppHandle) -> settings::AppSettings {
 
 #[tauri::command]
 fn save_app_settings(app: tauri::AppHandle, settings: settings::AppSettings) -> Result<(), String> {
+    color_picker::update_hotkey_settings(
+        settings.color_picker_shortcut_enabled,
+        settings.color_picker_shortcut.clone(),
+    );
     settings::save_settings(&app, &settings)
+}
+
+#[tauri::command]
+fn pick_screen_color() -> Result<String, String> {
+    let hex = color_picker::sample_color_at_cursor()?;
+    let _ = clipboard::write_clipboard_text(&hex);
+    Ok(hex)
 }
 
 #[tauri::command]
@@ -176,6 +188,13 @@ pub fn run() {
             if initial_settings.auto_start {
                 let _ = settings::set_autostart_registry(true);
             }
+
+            // Start Global Hotkey Listener for Color Picker (Works anywhere across Windows)
+            color_picker::start_color_picker_hotkey(
+                app.handle().clone(),
+                initial_settings.color_picker_shortcut_enabled,
+                initial_settings.color_picker_shortcut,
+            );
 
             // Intercept close button on settings window so it hides instead of destroys
             if let Some(settings_win) = app.get_webview_window("settings") {
@@ -248,7 +267,8 @@ pub fn run() {
             get_app_settings,
             save_app_settings,
             get_audio_devices,
-            set_default_audio_device
+            set_default_audio_device,
+            pick_screen_color
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

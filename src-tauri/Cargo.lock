@@ -5146,7 +5146,7 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
 name = "wink"
-version = "1.2.8"
+version = "1.2.9"
 dependencies = [
  "base64 0.22.1",
  "serde",
