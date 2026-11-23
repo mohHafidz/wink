@@ -258,6 +258,7 @@ pub fn start_monitor_follower(app: tauri::AppHandle) {
     thread::spawn(move || {
         let mut was_inside_capsule = true;
         let mut zorder_tick = 0u32;
+        let mut cached_monitors: Vec<(i32, i32, i32, i32)> = Vec::new();
 
         loop {
             thread::sleep(Duration::from_millis(50));
@@ -277,7 +278,8 @@ pub fn start_monitor_follower(app: tauri::AppHandle) {
 
                 // Check if global cursor is inside the capsule bounding box relative to our window
                 let mut pt = windows::Win32::Foundation::POINT::default();
-                if unsafe { GetCursorPos(&mut pt) }.is_ok() {
+                let has_cursor = unsafe { GetCursorPos(&mut pt) }.is_ok();
+                if has_cursor {
                     if let Ok(win_pos) = window.outer_position() {
                         let scale = window.scale_factor().unwrap_or(1.0);
                         // Convert physical screen coordinates to logical client coordinates of our window
@@ -315,25 +317,29 @@ pub fn start_monitor_follower(app: tauri::AppHandle) {
                     continue;
                 }
 
-                if let Ok(cursor) = window.cursor_position() {
-                    let cx = cursor.x as i32;
-                    let cy = cursor.y as i32;
-
+                // Refresh monitor cache only once every 3 seconds (60 ticks) instead of 20 FPS
+                if zorder_tick % 60 == 0 || cached_monitors.is_empty() {
                     if let Ok(monitors) = window.available_monitors() {
-                        let target_idx = monitors.iter().position(|m| {
-                            let pos = m.position();
-                            let size = m.size();
-                            cx >= pos.x
-                                && cx < (pos.x + size.width as i32)
-                                && cy >= pos.y
-                                && cy < (pos.y + size.height as i32)
-                        });
+                        cached_monitors = monitors
+                            .into_iter()
+                            .map(|m| {
+                                let pos = m.position();
+                                let size = m.size();
+                                (pos.x, pos.y, size.width as i32, size.height as i32)
+                            })
+                            .collect();
+                    }
+                }
 
-                        if let Some(idx) = target_idx {
-                            let current = CURRENT_MONITOR_IDX.load(Ordering::SeqCst);
-                            if idx != current {
-                                let _ = move_window_to_monitor(&window, idx);
-                            }
+                if has_cursor && !cached_monitors.is_empty() {
+                    let target_idx = cached_monitors.iter().position(|&(mx, my, mw, mh)| {
+                        pt.x >= mx && pt.x < (mx + mw) && pt.y >= my && pt.y < (my + mh)
+                    });
+
+                    if let Some(idx) = target_idx {
+                        let current = CURRENT_MONITOR_IDX.load(Ordering::SeqCst);
+                        if idx != current {
+                            let _ = move_window_to_monitor(&window, idx);
                         }
                     }
                 }

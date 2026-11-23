@@ -145,7 +145,7 @@ pub fn is_autostart_registered() -> bool {
             "query",
             "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
             "/v",
-            "IslandWin",
+            "Wink",
         ])
         .output();
 

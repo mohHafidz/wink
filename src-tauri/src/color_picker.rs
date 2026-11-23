@@ -1,7 +1,8 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
 use windows::Win32::Foundation::{LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::Graphics::Gdi::{GetDC, GetPixel, ReleaseDC};
@@ -19,6 +20,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 const HOTKEY_ID: i32 = 0x574B; // "WK" (Wink)
 const WM_RELOAD_HOTKEY: u32 = WM_USER + 101;
 const WM_START_PICKER: u32 = WM_USER + 102;
+const WM_CANCEL_PICKER: u32 = WM_USER + 103;
 
 #[derive(Clone, Copy)]
 struct SyncHHook(HHOOK);
@@ -29,6 +31,8 @@ static IS_PICKING: AtomicBool = AtomicBool::new(false);
 static MOUSE_HOOK: Mutex<Option<SyncHHook>> = Mutex::new(None);
 static KBD_HOOK: Mutex<Option<SyncHHook>> = Mutex::new(None);
 static APP_HANDLE: Mutex<Option<AppHandle>> = Mutex::new(None);
+static LAST_PREVIEW_MS: AtomicU64 = AtomicU64::new(0);
+static LAST_PREVIEW_PT: Mutex<(i32, i32)> = Mutex::new((-9999, -9999));
 
 pub fn sample_color_at_point(x: i32, y: i32) -> Result<String, String> {
     unsafe {
@@ -92,21 +96,37 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
             stop_picking_internal();
             return LRESULT(1);
         } else if msg == WM_MOUSEMOVE {
-            let info = unsafe { *(lparam.0 as *const MSLLHOOKSTRUCT) };
-            if let Ok(hex) = sample_color_at_point(info.pt.x, info.pt.y) {
-                if let Ok(guard) = APP_HANDLE.lock() {
-                    if let Some(app) = guard.as_ref() {
-                        let _ = app.emit(
-                            "color-picker-preview",
-                            serde_json::json!({ "hex": hex, "x": info.pt.x, "y": info.pt.y }),
-                        );
-                    }
-                }
-            }
             // Keep crosshair cursor during interactive picker
             unsafe {
                 if let Ok(cursor) = LoadCursorW(None, IDC_CROSS) {
                     let _ = SetCursor(Some(cursor));
+                }
+            }
+
+            let info = unsafe { *(lparam.0 as *const MSLLHOOKSTRUCT) };
+            let now_ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+
+            let last_ms = LAST_PREVIEW_MS.load(Ordering::Relaxed);
+            let mut pt_lock = LAST_PREVIEW_PT.lock().unwrap();
+
+            // Throttle preview sampling to at most every 40ms and only when point actually moves
+            if now_ms.saturating_sub(last_ms) >= 40 && (info.pt.x != pt_lock.0 || info.pt.y != pt_lock.1) {
+                LAST_PREVIEW_MS.store(now_ms, Ordering::Relaxed);
+                *pt_lock = (info.pt.x, info.pt.y);
+                drop(pt_lock);
+
+                if let Ok(hex) = sample_color_at_point(info.pt.x, info.pt.y) {
+                    if let Ok(guard) = APP_HANDLE.lock() {
+                        if let Some(app) = guard.as_ref() {
+                            let _ = app.emit(
+                                "color-picker-preview",
+                                serde_json::json!({ "hex": hex, "x": info.pt.x, "y": info.pt.y }),
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -150,16 +170,12 @@ fn stop_picking_internal() {
     }
 }
 
-pub fn start_interactive_picker(app: AppHandle) {
+fn install_hooks_on_active_thread(app: &AppHandle) {
     if IS_PICKING.load(Ordering::SeqCst) {
         return; // Already in picking mode
     }
 
     IS_PICKING.store(true, Ordering::SeqCst);
-
-    if let Ok(mut guard) = APP_HANDLE.lock() {
-        *guard = Some(app.clone());
-    }
 
     let _ = app.emit("color-picker-started", ());
 
@@ -169,7 +185,7 @@ pub fn start_interactive_picker(app: AppHandle) {
             let _ = SetCursor(Some(cursor));
         }
 
-        // Install Low-Level Mouse & Keyboard hooks
+        // Install Low-Level Mouse & Keyboard hooks on this thread with an active message loop
         if let Ok(hook) = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), None, 0) {
             let mut lock = MOUSE_HOOK.lock().unwrap();
             *lock = Some(SyncHHook(hook));
@@ -182,8 +198,22 @@ pub fn start_interactive_picker(app: AppHandle) {
     }
 }
 
+pub fn start_interactive_picker(app: AppHandle) {
+    if let Ok(mut guard) = APP_HANDLE.lock() {
+        *guard = Some(app);
+    }
+    trigger_interactive_picker_from_thread();
+}
+
 pub fn cancel_interactive_picker() {
     stop_picking_internal();
+    if let Ok(guard) = HOTKEY_MANAGER.lock() {
+        if let Some(state) = guard.as_ref() {
+            unsafe {
+                let _ = PostThreadMessageW(state.thread_id, WM_CANCEL_PICKER, WPARAM(0), LPARAM(0));
+            }
+        }
+    }
 }
 
 fn parse_shortcut(shortcut_str: &str) -> (HOT_KEY_MODIFIERS, u32) {
@@ -198,9 +228,10 @@ fn parse_shortcut(shortcut_str: &str) -> (HOT_KEY_MODIFIERS, u32) {
             "SHIFT" => mods |= MOD_SHIFT,
             "ALT" => mods |= MOD_ALT,
             "WIN" | "WINDOWS" => mods |= MOD_WIN,
-            k if k.len() == 1 => {
-                let ch = k.chars().next().unwrap();
-                key_code = ch as u32;
+            k if !k.is_empty() => {
+                if let Some(ch) = k.chars().next() {
+                    key_code = ch as u32;
+                }
             }
             "F1" => key_code = 0x70,
             "F2" => key_code = 0x71,
@@ -278,10 +309,12 @@ pub fn start_color_picker_hotkey(app: AppHandle, initial_enabled: bool, initial_
                     current_registered = register(&sc);
                 }
             } else if msg.message == WM_START_PICKER {
-                start_interactive_picker(app_clone.clone());
+                install_hooks_on_active_thread(&app_clone);
+            } else if msg.message == WM_CANCEL_PICKER {
+                stop_picking_internal();
             } else if msg.message == WM_HOTKEY && msg.wParam.0 as i32 == HOTKEY_ID {
                 // When global shortcut is pressed: Enter interactive selection mode!
-                start_interactive_picker(app_clone.clone());
+                install_hooks_on_active_thread(&app_clone);
             }
 
             unsafe {

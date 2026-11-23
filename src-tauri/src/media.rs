@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::Mutex;
 use std::thread;
+use std::time::Duration;
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession,
     GlobalSystemMediaTransportControlsSessionManager,
@@ -215,8 +216,8 @@ pub fn fetch_media_track() -> Result<Option<MediaTrackInfo>, String> {
         .send(MediaCommand::GetInfo(tx))
         .map_err(|e| format!("Failed to send to media worker: {:?}", e))?;
 
-    rx.recv()
-        .map_err(|e| format!("Failed to receive from media worker: {:?}", e))?
+    rx.recv_timeout(Duration::from_millis(2000))
+        .map_err(|e| format!("Timeout receiving from media worker: {:?}", e))?
 }
 
 pub fn toggle_play_pause() -> Result<(), String> {
@@ -231,7 +232,8 @@ pub fn toggle_play_pause() -> Result<(), String> {
         .send(MediaCommand::TogglePlayPause(tx))
         .map_err(|e| format!("{:?}", e))?;
 
-    rx.recv().map_err(|e| format!("{:?}", e))?
+    rx.recv_timeout(Duration::from_millis(2000))
+        .map_err(|e| format!("{:?}", e))?
 }
 
 pub fn skip_next() -> Result<(), String> {
@@ -246,7 +248,8 @@ pub fn skip_next() -> Result<(), String> {
         .send(MediaCommand::SkipNext(tx))
         .map_err(|e| format!("{:?}", e))?;
 
-    rx.recv().map_err(|e| format!("{:?}", e))?
+    rx.recv_timeout(Duration::from_millis(2000))
+        .map_err(|e| format!("{:?}", e))?
 }
 
 pub fn skip_previous() -> Result<(), String> {
@@ -261,7 +264,8 @@ pub fn skip_previous() -> Result<(), String> {
         .send(MediaCommand::SkipPrevious(tx))
         .map_err(|e| format!("{:?}", e))?;
 
-    rx.recv().map_err(|e| format!("{:?}", e))?
+    rx.recv_timeout(Duration::from_millis(2000))
+        .map_err(|e| format!("{:?}", e))?
 }
 
 pub fn seek(position_seconds: u64) -> Result<(), String> {
@@ -276,5 +280,6 @@ pub fn seek(position_seconds: u64) -> Result<(), String> {
         .send(MediaCommand::Seek(position_seconds, tx))
         .map_err(|e| format!("{:?}", e))?;
 
-    rx.recv().map_err(|e| format!("{:?}", e))?
+    rx.recv_timeout(Duration::from_millis(2000))
+        .map_err(|e| format!("{:?}", e))?
 }

@@ -7,7 +7,7 @@ use windows::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber, OpenClipboard,
     SetClipboardData,
 };
-use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClipboardItem {
@@ -61,7 +61,15 @@ pub fn read_clipboard_text() -> Option<String> {
             }
         };
 
-        let ptr = GlobalLock(HGLOBAL(handle.0));
+        let hglobal = HGLOBAL(handle.0);
+        let total_bytes = GlobalSize(hglobal);
+        let max_u16 = total_bytes / 2;
+        if max_u16 == 0 {
+            let _ = CloseClipboard();
+            return None;
+        }
+
+        let ptr = GlobalLock(hglobal);
         if ptr.is_null() {
             let _ = CloseClipboard();
             return None;
@@ -69,7 +77,7 @@ pub fn read_clipboard_text() -> Option<String> {
 
         let mut len = 0;
         let mut curr = ptr as *const u16;
-        while *curr != 0 {
+        while len < max_u16 && *curr != 0 {
             len += 1;
             curr = curr.add(1);
         }
@@ -77,7 +85,7 @@ pub fn read_clipboard_text() -> Option<String> {
         let wide_slice = std::slice::from_raw_parts(ptr as *const u16, len);
         let text = String::from_utf16_lossy(wide_slice);
 
-        let _ = GlobalUnlock(HGLOBAL(handle.0));
+        let _ = GlobalUnlock(hglobal);
         let _ = CloseClipboard();
 
         Some(text)

@@ -636,18 +636,36 @@ export const DynamicIsland: React.FC = () => {
       }
     };
 
-    pollMedia();
-    const pollInterval = setInterval(pollMedia, 1000);
+    let timeoutId: number | null = null;
+    let isPolling = false;
+
+    const runPoll = async () => {
+      if (!isMounted) return;
+      if (isPolling) return;
+      isPolling = true;
+      try {
+        await pollMedia();
+      } finally {
+        isPolling = false;
+        if (isMounted) {
+          timeoutId = window.setTimeout(runPoll, 1000);
+        }
+      }
+    };
+
+    runPoll();
     return () => {
       isMounted = false;
-      clearInterval(pollInterval);
+      if (timeoutId) clearTimeout(timeoutId);
     };
   }, []);
 
-  // Poll Windows Real-Time Clipboard History
+  // Poll Windows Real-Time Clipboard History (Guarded Chained Queue)
   useEffect(() => {
     if (!isTauriEnv) return;
     let isMounted = true;
+    let timeoutId: number | null = null;
+    let isPolling = false;
 
     const pollClipboard = async () => {
       try {
@@ -660,18 +678,34 @@ export const DynamicIsland: React.FC = () => {
       }
     };
 
-    pollClipboard();
-    const pollInterval = setInterval(pollClipboard, 800);
+    const runPoll = async () => {
+      if (!isMounted) return;
+      if (isPolling) return;
+      isPolling = true;
+      try {
+        await pollClipboard();
+      } finally {
+        isPolling = false;
+        if (isMounted) {
+          timeoutId = window.setTimeout(runPoll, 800);
+        }
+      }
+    };
+
+    runPoll();
     return () => {
       isMounted = false;
-      clearInterval(pollInterval);
+      if (timeoutId) clearTimeout(timeoutId);
     };
   }, []);
 
-  // Poll Windows OS Master Volume Events (Physical keys / System slider)
+  // Poll Windows OS Master Volume Events (Physical keys / System slider) (Guarded Chained Queue)
   useEffect(() => {
     if (!isTauriEnv) return;
     let isMounted = true;
+    let timeoutId: number | null = null;
+    let isPolling = false;
+
     const checkVolume = async () => {
       try {
         const [vol, changed] = await invoke<[number, boolean]>('get_volume_status');
@@ -709,18 +743,34 @@ export const DynamicIsland: React.FC = () => {
       }
     };
 
-    checkVolume();
-    const interval = setInterval(checkVolume, 100);
+    const runPoll = async () => {
+      if (!isMounted) return;
+      if (isPolling) return;
+      isPolling = true;
+      try {
+        await checkVolume();
+      } finally {
+        isPolling = false;
+        if (isMounted) {
+          timeoutId = window.setTimeout(runPoll, 120);
+        }
+      }
+    };
+
+    runPoll();
     return () => {
       isMounted = false;
-      clearInterval(interval);
+      if (timeoutId) clearTimeout(timeoutId);
     };
   }, [previousNonVolumeState, settings.volumeHudEnabled, settings.volumeDuration]);
 
-  // Poll Foreground Window Maximized status (Universal Win32 Detection)
+  // Poll Foreground Window Maximized status (Universal Win32 Detection) (Guarded Chained Queue)
   useEffect(() => {
     if (!isTauriEnv) return;
     let isMounted = true;
+    let timeoutId: number | null = null;
+    let isPolling = false;
+
     const checkMaximized = async () => {
       try {
         const [isMax, isGame] = await Promise.all([
@@ -755,11 +805,24 @@ export const DynamicIsland: React.FC = () => {
       }
     };
 
-    checkMaximized();
-    const interval = setInterval(checkMaximized, 500);
+    const runPoll = async () => {
+      if (!isMounted) return;
+      if (isPolling) return;
+      isPolling = true;
+      try {
+        await checkMaximized();
+      } finally {
+        isPolling = false;
+        if (isMounted) {
+          timeoutId = window.setTimeout(runPoll, 500);
+        }
+      }
+    };
+
+    runPoll();
     return () => {
       isMounted = false;
-      clearInterval(interval);
+      if (timeoutId) clearTimeout(timeoutId);
     };
   }, [isPlaying, settings.autoStealth]);
 
