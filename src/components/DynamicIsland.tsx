@@ -71,6 +71,8 @@ const INITIAL_CLIPBOARD: ClipboardEntry[] = [
   { id: 'c4', item_type: 'TEXT', content: 'git commit -m "feat: fluid spring physics"', time: '18m lalu' },
 ];
 
+const CAROUSEL_STATES: LifecycleState[] = ['hover-media', 'pinned-shelf', 'pinned-clip', 'pinned-palette'];
+
 export interface AudioDevice {
   id: string;
   name: string;
@@ -499,15 +501,7 @@ export const DynamicIsland: React.FC = () => {
           top = settings.verticalOffset;
           break;
         case 'hover-media':
-          w = 464;
-          h = 194;
-          top = 0;
-          break;
         case 'pinned-shelf':
-          w = 464;
-          h = 194;
-          top = 0;
-          break;
         case 'pinned-clip':
         case 'pinned-palette':
           w = 464;
@@ -1419,19 +1413,7 @@ export const DynamicIsland: React.FC = () => {
           borderRadius: '9999px',
         };
       case 'hover-media':
-        return {
-          top: '0px',
-          width: '456px',
-          height: '184px',
-          borderRadius: '0px 0px 24px 24px',
-        };
       case 'pinned-shelf':
-        return {
-          top: '0px',
-          width: '456px',
-          height: '184px',
-          borderRadius: '0px 0px 24px 24px',
-        };
       case 'pinned-clip':
       case 'pinned-palette':
         return {
@@ -1500,8 +1482,8 @@ export const DynamicIsland: React.FC = () => {
     }
   };
 
-  const isCarouselOpen = state === 'hover-media' || state === 'pinned-shelf' || state === 'pinned-clip' || state === 'pinned-palette';
-  const slideIndex = state === 'hover-media' ? 0 : state === 'pinned-shelf' ? 1 : state === 'pinned-clip' ? 2 : 3;
+  const isCarouselOpen = CAROUSEL_STATES.includes(state);
+  const slideIndex = Math.max(0, CAROUSEL_STATES.indexOf(state));
 
   return (
     <div
@@ -2426,9 +2408,7 @@ export const DynamicIsland: React.FC = () => {
                 onClick={(e) => {
                   e.stopPropagation();
                   if (slideIndex > 0) {
-                    if (slideIndex === 1) setState('hover-media');
-                    else if (slideIndex === 2) setState('pinned-shelf');
-                    else if (slideIndex === 3) setState('pinned-clip');
+                    setState(CAROUSEL_STATES[slideIndex - 1]);
                   }
                 }}
                 disabled={slideIndex === 0}
@@ -2442,72 +2422,32 @@ export const DynamicIsland: React.FC = () => {
                 <ChevronLeft className="w-4 h-4" />
               </button>
 
-              {/* CENTER: ROCK-SOLID CAROUSEL DOTS - COMPLETELY FIXED IN POSITION */}
+              {/* CENTER: ROCK-SOLID CAROUSEL DOTS */}
               <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1 z-20">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setState('hover-media');
-                  }}
-                  className="py-2 px-1.5 cursor-pointer group flex items-center justify-center"
-                  title="Slide 1: Kontrol Media"
-                >
-                  <div
-                    className={`h-1.5 rounded-full transition-all duration-300 ${
-                      slideIndex === 0
-                        ? 'w-5 bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.6)]'
-                        : 'w-2 bg-white/30 group-hover:bg-white/60'
-                    }`}
-                  />
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setState('pinned-shelf');
-                  }}
-                  className="py-2 px-1.5 cursor-pointer group flex items-center justify-center"
-                  title={`Slide 2: Drop Shelf (${shelfFiles.length} berkas)`}
-                >
-                  <div
-                    className={`h-1.5 rounded-full transition-all duration-300 ${
-                      slideIndex === 1
-                        ? 'w-5 bg-teal-400 shadow-[0_0_8px_rgba(45,212,191,0.6)]'
-                        : 'w-2 bg-white/30 group-hover:bg-white/60'
-                    }`}
-                  />
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setState('pinned-clip');
-                  }}
-                  className="py-2 px-1.5 cursor-pointer group flex items-center justify-center"
-                  title={`Slide 3: Riwayat Clipboard (${clipboard.length} klip)`}
-                >
-                  <div
-                    className={`h-1.5 rounded-full transition-all duration-300 ${
-                      slideIndex === 2
-                        ? 'w-5 bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]'
-                        : 'w-2 bg-white/30 group-hover:bg-white/60'
-                    }`}
-                  />
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setState('pinned-palette');
-                  }}
-                  className="py-2 px-1.5 cursor-pointer group flex items-center justify-center"
-                  title={`Slide 4: Palet Warna (${palette.length}/8 warna)`}
-                >
-                  <div
-                    className={`h-1.5 rounded-full transition-all duration-300 ${
-                      slideIndex === 3
-                        ? 'w-5 bg-purple-400 shadow-[0_0_8px_rgba(192,132,252,0.6)]'
-                        : 'w-2 bg-white/30 group-hover:bg-white/60'
-                    }`}
-                  />
-                </button>
+                {[
+                  { state: 'hover-media' as const, color: 'bg-cyan-400', shadow: 'shadow-[0_0_8px_rgba(34,211,238,0.6)]', title: 'Slide 1: Kontrol Media' },
+                  { state: 'pinned-shelf' as const, color: 'bg-teal-400', shadow: 'shadow-[0_0_8px_rgba(45,212,191,0.6)]', title: `Slide 2: Drop Shelf (${shelfFiles.length} berkas)` },
+                  { state: 'pinned-clip' as const, color: 'bg-amber-400', shadow: 'shadow-[0_0_8px_rgba(251,191,36,0.6)]', title: `Slide 3: Riwayat Clipboard (${clipboard.length} klip)` },
+                  { state: 'pinned-palette' as const, color: 'bg-purple-400', shadow: 'shadow-[0_0_8px_rgba(192,132,252,0.6)]', title: `Slide 4: Palet Warna (${palette.length}/8 warna)` },
+                ].map((item, idx) => (
+                  <button
+                    key={item.state}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setState(item.state);
+                    }}
+                    className="py-2 px-1.5 cursor-pointer group flex items-center justify-center"
+                    title={item.title}
+                  >
+                    <div
+                      className={`h-1.5 rounded-full transition-all duration-300 ${
+                        slideIndex === idx
+                          ? `w-5 ${item.color} ${item.shadow}`
+                          : 'w-2 bg-white/30 group-hover:bg-white/60'
+                      }`}
+                    />
+                  </button>
+                ))}
               </div>
 
               {/* Right: Next Slide Arrow Button + Settings Shortcut */}
@@ -2515,15 +2455,13 @@ export const DynamicIsland: React.FC = () => {
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (slideIndex < 3) {
-                      if (slideIndex === 0) setState('pinned-shelf');
-                      else if (slideIndex === 1) setState('pinned-clip');
-                      else if (slideIndex === 2) setState('pinned-palette');
+                    if (slideIndex < CAROUSEL_STATES.length - 1) {
+                      setState(CAROUSEL_STATES[slideIndex + 1]);
                     }
                   }}
-                  disabled={slideIndex === 3}
+                  disabled={slideIndex >= CAROUSEL_STATES.length - 1}
                   className={`w-7 h-6 rounded-lg flex items-center justify-center transition-all ${
-                    slideIndex === 3
+                    slideIndex >= CAROUSEL_STATES.length - 1
                       ? 'opacity-20 text-white/30 cursor-default'
                       : 'text-white/70 hover:text-white hover:bg-white/10 active:scale-90 cursor-pointer'
                   }`}

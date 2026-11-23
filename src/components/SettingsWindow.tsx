@@ -16,12 +16,23 @@ import { check } from '@tauri-apps/plugin-updater';
 import { AppSettings, DEFAULT_SETTINGS } from '../types';
 import { getStoredSettings, fetchStoredSettings, saveStoredSettings } from '../settingsStore';
 
+type SettingsTab = 'tampilan' | 'perilaku' | 'audio' | 'monitor' | 'sistem' | 'pembaruan';
+
+const SETTINGS_TABS: { id: SettingsTab; label: string; icon: React.FC<{ className?: string }> }[] = [
+  { id: 'tampilan', label: 'Tampilan & Tema', icon: Sun },
+  { id: 'perilaku', label: 'Perilaku Pintar', icon: Zap },
+  { id: 'audio', label: 'Audio & Volume', icon: Volume2 },
+  { id: 'monitor', label: 'Multi-Monitor', icon: Monitor },
+  { id: 'sistem', label: 'Sistem & Startup', icon: Power },
+  { id: 'pembaruan', label: 'Pembaruan', icon: RotateCw },
+];
+
 interface SettingsProps {
   onClose?: () => void;
 }
 
 export const SettingsWindow: React.FC<SettingsProps> = ({ onClose }) => {
-  const [activeTab, setActiveTab] = useState<'tampilan' | 'perilaku' | 'audio' | 'monitor' | 'sistem' | 'pembaruan'>('tampilan');
+  const [activeTab, setActiveTab] = useState<SettingsTab>('tampilan');
   const [settings, setSettings] = useState<AppSettings>(() => getStoredSettings());
   const [isSavedNotice, setIsSavedNotice] = useState<boolean>(false);
   const [isCheckingUpdate, setIsCheckingUpdate] = useState<boolean>(false);
@@ -162,66 +173,22 @@ export const SettingsWindow: React.FC<SettingsProps> = ({ onClose }) => {
       <aside className="w-48 bg-black/20 border-r border-white/[0.06] p-2.5 flex flex-col justify-between">
           <div className="space-y-1">
             <div className="text-[10px] font-semibold text-white/40 uppercase tracking-wider px-2 py-1">Kategori</div>
-            
-            <button
-              onClick={() => setActiveTab('tampilan')}
-              className={`w-full text-left px-2.5 py-2 rounded-lg text-xs font-medium flex items-center gap-2.5 transition ${
-                activeTab === 'tampilan' ? 'bg-white/10 text-teal-300' : 'text-white/60 hover:text-white hover:bg-white/[0.04]'
-              }`}
-            >
-              <Sun className="w-4 h-4" />
-              <span>Tampilan & Tema</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('perilaku')}
-              className={`w-full text-left px-2.5 py-2 rounded-lg text-xs font-medium flex items-center gap-2.5 transition ${
-                activeTab === 'perilaku' ? 'bg-white/10 text-teal-300' : 'text-white/60 hover:text-white hover:bg-white/[0.04]'
-              }`}
-            >
-              <Zap className="w-4 h-4" />
-              <span>Perilaku Pintar</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('audio')}
-              className={`w-full text-left px-2.5 py-2 rounded-lg text-xs font-medium flex items-center gap-2.5 transition ${
-                activeTab === 'audio' ? 'bg-white/10 text-teal-300' : 'text-white/60 hover:text-white hover:bg-white/[0.04]'
-              }`}
-            >
-              <Volume2 className="w-4 h-4" />
-              <span>Audio & Volume</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('monitor')}
-              className={`w-full text-left px-2.5 py-2 rounded-lg text-xs font-medium flex items-center gap-2.5 transition ${
-                activeTab === 'monitor' ? 'bg-white/10 text-teal-300' : 'text-white/60 hover:text-white hover:bg-white/[0.04]'
-              }`}
-            >
-              <Monitor className="w-4 h-4" />
-              <span>Multi-Monitor</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('sistem')}
-              className={`w-full text-left px-2.5 py-2 rounded-lg text-xs font-medium flex items-center gap-2.5 transition ${
-                activeTab === 'sistem' ? 'bg-white/10 text-teal-300' : 'text-white/60 hover:text-white hover:bg-white/[0.04]'
-              }`}
-            >
-              <Power className="w-4 h-4" />
-              <span>Sistem & Startup</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('pembaruan')}
-              className={`w-full text-left px-2.5 py-2 rounded-lg text-xs font-medium flex items-center gap-2.5 transition ${
-                activeTab === 'pembaruan' ? 'bg-white/10 text-teal-300' : 'text-white/60 hover:text-white hover:bg-white/[0.04]'
-              }`}
-            >
-              <RotateCw className="w-4 h-4" />
-              <span>Pembaruan</span>
-            </button>
+            {SETTINGS_TABS.map((tab) => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`w-full text-left px-2.5 py-2 rounded-lg text-xs font-medium flex items-center gap-2.5 transition ${
+                    isActive ? 'bg-white/10 text-teal-300' : 'text-white/60 hover:text-white hover:bg-white/[0.04]'
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
           </div>
 
           <div className="px-2 pt-2 border-t border-white/[0.06] text-[10px] text-white/40 flex items-center justify-between">
